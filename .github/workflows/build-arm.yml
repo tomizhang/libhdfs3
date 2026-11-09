@@ -17,25 +17,8 @@ jobs:
 
       - name: Build in AlmaLinux 8 container (glibc 2.28)
         run: |
-          docker run --rm -v "$PWD":/workspace -w /workspace almalinux:8 bash -c "
-            set -e
-            echo '=== System glibc version ==='
-            ldd --version | head -n 1
-
-            echo '=== Installing dependencies ==='
-            dnf install -y epel-release 'dnf-command(config-manager)'
-            dnf config-manager --set-enabled powertools || dnf config-manager --set-enabled crb || true
-            dnf install -y gcc gcc-c++ cmake make protobuf-devel protobuf-compiler libxml2-devel krb5-devel libuuid-devel libgsasl-devel openssl-devel boost-devel
-
-            echo '=== Configuring CMake ==='
-            rm -rf build-glibc228
-            mkdir -p build-glibc228
-            cd build-glibc228
-            cmake .. -DCMAKE_BUILD_TYPE=Release
-
-            echo '=== Building libhdfs3.so ==='
-            make -j\$(nproc) libhdfs3-shared
-          "
+          chmod +x scripts/build_arm64.sh
+          docker run --rm -v "$PWD":/workspace -w /workspace almalinux:8 bash /workspace/scripts/build_arm64.sh
 
       - name: Verify build artifact and GLIBC version
         run: |
@@ -43,6 +26,8 @@ jobs:
           file build-glibc228/src/libhdfs3.so
           echo "=== Referenced GLIBC versions in libhdfs3.so ==="
           objdump -T build-glibc228/src/libhdfs3.so | grep -o 'GLIBC_[0-9.]*' | sort -uV
+          echo "=== Direct DT_NEEDED dependencies (readelf) ==="
+          readelf -d build-glibc228/src/libhdfs3.so | grep NEEDED
 
       - name: Upload ARM64 glibc-2.28 libhdfs3.so
         uses: actions/upload-artifact@v4
