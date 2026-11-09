@@ -1762,7 +1762,7 @@ const char * hdfsGetVersion() {
 }
 
 const char* hdfsGetGSaslVersion() {
-    return gsasl_version();
+    return gsasl_check_version(NULL);
 }
 
 int hdfsReleaseMemory() {
