@@ -76,7 +76,7 @@ public:
 private:
     bool readTrailingEmptyPacket();
     shared_ptr<PacketHeader> readPacketHeader();
-    shared_ptr<Socket> getNextPeer(const DatanodeInfo& dn, const bool connectToDnViaHostname);
+    shared_ptr<Socket> createNewPeer(const DatanodeInfo& dn, const bool connectToDnViaHostname);
     void checkResponse();
     void readNextPacket();
     void sendStatus();

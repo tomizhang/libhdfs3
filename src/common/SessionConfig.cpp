@@ -135,9 +135,9 @@ SessionConfig::SessionConfig(const Config & conf) {
         }, {
             &maxFileDescriptorCacheSize, "dfs.client.read.shortcircuit.streams.cache.size", 256, bind(CheckRangeGE<int32_t>, _1, _2, 0)
         }, {
-            &socketCacheExpiry, "dfs.client.socketcache.expiryMsec", 3000, bind(CheckRangeGE<int32_t>, _1, _2, 0)
+            &socketCacheExpiry, "dfs.client.socketcache.expiryMsec", 30000, bind(CheckRangeGE<int32_t>, _1, _2, 0)
         }, {
-            &socketCacheCapacity, "dfs.client.socketcache.capacity", 16, bind(CheckRangeGE<int32_t>, _1, _2, 0)
+            &socketCacheCapacity, "dfs.client.socketcache.capacity", 64, bind(CheckRangeGE<int32_t>, _1, _2, 0)
         }, {
             &stripeReaderThreadPoolSize, "dfs.client.read.striped.thread-pool.size", 64
         }, {

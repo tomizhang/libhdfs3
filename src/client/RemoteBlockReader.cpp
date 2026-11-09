@@ -72,12 +72,37 @@ RemoteBlockReader::RemoteBlockReader(const ExtendedBlock& eb,
     readTimeout = conf.getInputReadTimeout();
     writeTimeout = conf.getInputWriteTimeout();
     connTimeout = conf.getInputConnTimeout();
-    sock = getNextPeer(datanode, conf.connectViaHostname());
-    in = shared_ptr<BufferedSocketReader>(new BufferedSocketReaderImpl(*sock));
-    sender = shared_ptr<DataTransferProtocol>(new DataTransferProtocolSender(
-        *sock, writeTimeout, datanode.formatAddress()));
-    sender->readBlock(eb, token, clientName, start, len);
-    checkResponse();
+    bool connectToDnViaHostname = conf.connectViaHostname();
+
+    bool fromCache = false;
+    sock = peerCache.getConnection(datanode);
+    if (sock) {
+        fromCache = true;
+    } else {
+        sock = createNewPeer(datanode, connectToDnViaHostname);
+    }
+
+    try {
+        in = shared_ptr<BufferedSocketReader>(new BufferedSocketReaderImpl(*sock));
+        sender = shared_ptr<DataTransferProtocol>(new DataTransferProtocolSender(
+            *sock, writeTimeout, datanode.formatAddress()));
+        sender->readBlock(eb, token, clientName, start, len);
+        checkResponse();
+    } catch (const HdfsException &) {
+        if (fromCache) {
+            LOG(DEBUG1, "Cached connection to datanode %s failed or closed, retrying with fresh connection.",
+                datanode.formatAddress().c_str());
+            sock->close();
+            sock = createNewPeer(datanode, connectToDnViaHostname);
+            in = shared_ptr<BufferedSocketReader>(new BufferedSocketReaderImpl(*sock));
+            sender = shared_ptr<DataTransferProtocol>(new DataTransferProtocolSender(
+                *sock, writeTimeout, datanode.formatAddress()));
+            sender->readBlock(eb, token, clientName, start, len);
+            checkResponse();
+        } else {
+            throw;
+        }
+    }
 }
 
 RemoteBlockReader::~RemoteBlockReader() {
@@ -88,31 +113,26 @@ RemoteBlockReader::~RemoteBlockReader() {
     }
 }
 
-shared_ptr<Socket> RemoteBlockReader::getNextPeer(const DatanodeInfo& dn, const bool connectToDnViaHostname) {
-    shared_ptr<Socket> sock;
+shared_ptr<Socket> RemoteBlockReader::createNewPeer(const DatanodeInfo& dn, const bool connectToDnViaHostname) {
+    shared_ptr<Socket> s;
     try {
-        sock = peerCache.getConnection(dn);
+        s = shared_ptr<Socket>(new TcpSocketImpl);
 
-        if (!sock) {
-            sock = shared_ptr<Socket>(new TcpSocketImpl);
-            
-            std::string host;
-            if(connectToDnViaHostname) {
-                host = dn.getHostName();
-            } else {
-                host = dn.getIpAddr();
-            }
-            sock->connect(host.c_str(), dn.getXferPort(),
-                          connTimeout);
-            sock->setNoDelay(true);
+        std::string host;
+        if (connectToDnViaHostname) {
+            host = dn.getHostName();
+        } else {
+            host = dn.getIpAddr();
         }
+        s->connect(host.c_str(), dn.getXferPort(), connTimeout);
+        s->setNoDelay(true);
     } catch (const HdfsTimeoutException & e) {
         NESTED_THROW(HdfsIOException,
                      "RemoteBlockReader: Failed to connect to %s",
                      dn.formatAddress().c_str());
     }
 
-    return sock;
+    return s;
 }
 
 void RemoteBlockReader::checkResponse() {
@@ -311,13 +331,17 @@ void RemoteBlockReader::readNextPacket() {
 }
 
 bool RemoteBlockReader::readTrailingEmptyPacket() {
-    shared_ptr<PacketHeader> trailingHeader = readPacketHeader();
+    try {
+        shared_ptr<PacketHeader> trailingHeader = readPacketHeader();
 
-    if (!trailingHeader->isLastPacketInBlock() || trailingHeader->getDataLen() != 0) {
+        if (trailingHeader->getDataLen() != 0) {
+            return false;
+        }
+
+        return true;
+    } catch (...) {
         return false;
     }
-
-    return true;
 }
 
 void RemoteBlockReader::sendStatus() {

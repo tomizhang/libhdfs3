@@ -32,7 +32,6 @@
 #include <utility>
 
 #include "common/DateTime.h"
-#include "common/LruMap.h"
 #include "common/Memory.h"
 #include "common/SessionConfig.h"
 #include "network/Socket.h"
@@ -49,6 +48,8 @@ class PeerCache {
 
   void addConnection(shared_ptr<Socket> peer, const DatanodeInfo& datanode);
 
+  void clear();
+
   typedef std::pair<shared_ptr<Socket>, steady_clock::time_point> value_type;
 
  private:
@@ -57,7 +58,6 @@ class PeerCache {
  private:
   const int cacheSize;
   int64_t expireTimeInterval;  // milliseconds
-  static LruMap<std::string, value_type> Map;
 };
 }
 }

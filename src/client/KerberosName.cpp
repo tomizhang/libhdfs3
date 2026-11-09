@@ -37,12 +37,40 @@
 namespace Hdfs {
 namespace Internal {
 
-static void HandleRegError(int rc, regex_t * comp) {
+static void HandleRegError(int rc, const regex_t * comp) {
     std::vector<char> buffer;
     size_t size = regerror(rc, comp, NULL, 0);
     buffer.resize(size + 1);
     regerror(rc, comp, buffer.data(), buffer.size());
     THROW(HdfsIOException, "KerberosName: Failed to parse Kerberos principal.");
+}
+
+class KerberosRegex {
+public:
+    KerberosRegex() {
+        static const char * pattern = "([^/@]*)(/([^/@]*))?@([^/@]*)";
+        memset(&reg, 0, sizeof(reg));
+        int rc = regcomp(&reg, pattern, REG_EXTENDED);
+        if (rc) {
+            HandleRegError(rc, &reg);
+        }
+    }
+
+    ~KerberosRegex() {
+        regfree(&reg);
+    }
+
+    const regex_t * get() const {
+        return &reg;
+    }
+
+private:
+    regex_t reg;
+};
+
+static const regex_t * GetKerberosRegex() {
+    static const KerberosRegex regexInstance;
+    return regexInstance.get();
 }
 
 KerberosName::KerberosName() {
@@ -53,61 +81,45 @@ KerberosName::KerberosName(const std::string & principal) {
 }
 
 void KerberosName::parse(const std::string & principal) {
-    int rc;
-    static const char * pattern = "([^/@]*)(/([^/@]*))?@([^/@]*)";
-    regex_t comp;
-    regmatch_t pmatch[5];
-
     if (principal.empty()) {
         return;
     }
 
-    memset(&comp, 0, sizeof(regex_t));
-    rc = regcomp(&comp, pattern, REG_EXTENDED);
+    const regex_t * comp = GetKerberosRegex();
+    regmatch_t pmatch[5];
+    memset(pmatch, 0, sizeof(pmatch));
 
-    if (rc) {
-        HandleRegError(rc, &comp);
+    int rc = regexec(comp, principal.c_str(),
+                     sizeof(pmatch) / sizeof(pmatch[0]), pmatch, 0);
+
+    if (rc && rc != REG_NOMATCH) {
+        HandleRegError(rc, comp);
     }
 
-    try {
-        memset(pmatch, 0, sizeof(pmatch));
-        rc = regexec(&comp, principal.c_str(),
-                     sizeof(pmatch) / sizeof(pmatch[1]), pmatch, 0);
-
-        if (rc && rc != REG_NOMATCH) {
-            HandleRegError(rc, &comp);
-        }
-
-        if (rc == REG_NOMATCH) {
-            if (principal.find('@') != principal.npos) {
-                THROW(HdfsIOException,
-                      "KerberosName: Malformed Kerberos name: %s",
-                      principal.c_str());
-            } else {
-                name = principal;
-            }
+    if (rc == REG_NOMATCH) {
+        if (principal.find('@') != principal.npos) {
+            THROW(HdfsIOException,
+                  "KerberosName: Malformed Kerberos name: %s",
+                  principal.c_str());
         } else {
-            if (pmatch[1].rm_so != -1) {
-                name = principal.substr(pmatch[1].rm_so,
-                                        pmatch[1].rm_eo - pmatch[1].rm_so);
-            }
-
-            if (pmatch[3].rm_so != -1) {
-                host = principal.substr(pmatch[3].rm_so,
-                                        pmatch[3].rm_eo - pmatch[3].rm_so);
-            }
-
-            if (pmatch[4].rm_so != -1) {
-                realm = principal.substr(pmatch[4].rm_so,
-                                         pmatch[4].rm_eo - pmatch[4].rm_so);
-            }
+            name = principal;
         }
-    } catch (...) {
-        regfree(&comp);
-        throw;
-    }
+    } else {
+        if (pmatch[1].rm_so != -1) {
+            name = principal.substr(pmatch[1].rm_so,
+                                    pmatch[1].rm_eo - pmatch[1].rm_so);
+        }
 
-    regfree(&comp);
+        if (pmatch[3].rm_so != -1) {
+            host = principal.substr(pmatch[3].rm_so,
+                                    pmatch[3].rm_eo - pmatch[3].rm_so);
+        }
+
+        if (pmatch[4].rm_so != -1) {
+            realm = principal.substr(pmatch[4].rm_so,
+                                     pmatch[4].rm_eo - pmatch[4].rm_so);
+        }
+    }
 }
 
 size_t KerberosName::hash_value() const {

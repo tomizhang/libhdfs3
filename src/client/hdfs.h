@@ -754,6 +754,13 @@ BlockLocation * hdfsGetFileBlockLocations(hdfsFS fs, const char * path,
  */
 void hdfsFreeFileBlockLocations(BlockLocation * locations, int numOfBlock);
 
+/**
+ * Release unused memory back to the operating system (e.g. via malloc_trim).
+ * Highly recommended in long-running processes or managed runtimes (ASP.NET Core, DuckDB)
+ * to prevent glibc arena memory explosion on Linux.
+ */
+void hdfsReleaseMemory(void);
+
 #ifdef __cplusplus
 }
 #endif

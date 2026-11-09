@@ -46,6 +46,22 @@
 #include <string>
 #include <libxml/uri.h>
 
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>
+#include <cstdlib>
+
+namespace {
+struct GlibcMemoryInit {
+    GlibcMemoryInit() {
+        if (getenv("MALLOC_ARENA_MAX") == NULL) {
+            mallopt(M_ARENA_MAX, 4);
+        }
+    }
+};
+static GlibcMemoryInit s_glibcMemoryInit;
+}
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -632,6 +648,10 @@ int hdfsDisconnect(hdfsFS fs) {
             fs->getFilesystem().disconnect();
             delete fs;
         }
+
+#if defined(__linux__) && defined(__GLIBC__)
+        malloc_trim(0);
+#endif
 
         return 0;
     } catch (const std::bad_alloc & e) {
@@ -1518,6 +1538,12 @@ void hdfsFreeFileBlockLocations(BlockLocation * locations, int numOfBlock) {
     }
 
     delete [] locations;
+}
+
+void hdfsReleaseMemory(void) {
+#if defined(__linux__) && defined(__GLIBC__)
+    malloc_trim(0);
+#endif
 }
 
 #ifdef __cplusplus
