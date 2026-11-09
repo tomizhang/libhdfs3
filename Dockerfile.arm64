@@ -1,0 +1,24 @@
+FROM --platform=linux/arm64 ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    cmake \
+    g++ \
+    make \
+    libprotobuf-dev \
+    protobuf-compiler \
+    libxml2-dev \
+    libkrb5-dev \
+    uuid-dev \
+    libgsasl7-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+COPY . /workspace
+
+RUN mkdir -p build && cd build \
+    && cmake .. -DCMAKE_BUILD_TYPE=Release \
+    && make -j$(nproc) libhdfs3-shared
+
+CMD ["cp", "-f", "build/src/libhdfs3.so", "/output/"]

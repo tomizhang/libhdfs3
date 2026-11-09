@@ -1,0 +1,43 @@
+name: Build ARM64 libhdfs3.so
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libprotobuf-dev protobuf-compiler libxml2-dev libkrb5-dev uuid-dev libgsasl7-dev
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build libhdfs3.so
+        run: |
+          cd build
+          make -j$(nproc) libhdfs3-shared
+
+      - name: Verify build artifact
+        run: |
+          ls -la build/src/libhdfs3.so*
+          file build/src/libhdfs3.so
+
+      - name: Upload ARM64 libhdfs3.so
+        uses: actions/upload-artifact@v4
+        with:
+          name: libhdfs3-linux-arm64
+          path: build/src/libhdfs3.so*
+          if-no-files-found: error
