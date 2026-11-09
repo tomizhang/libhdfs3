@@ -188,12 +188,12 @@ void DataTransferSaslClientInternal::readAndPrint()
         {
             std::cout<<"["<<std::setw(2)<<static_cast<int>(static_cast<unsigned char>(b[index]))<<"]";
             if((count+index+1) % 10 == 0){
-                std::cout<<endl;
+                std::cout<<std::endl;
             } else {
                 std::cout<<" ";
             }
         }
-        std::cout<<endl;
+        std::cout<<std::endl;
         count += length;
         //LOG(DEBUG1, "DataTransferSaslClientInternal::readAndPrint count: %d", count);
     }
@@ -203,16 +203,17 @@ void DataTransferSaslClientInternal::readAndPrint()
     //LOG(DEBUG1, "DataTransferSaslClientInternal::readAndPrint End");
 }
 
+#if 0
 static void logBuffer(std::vector<char> & buffer){
     //LOG(DEBUG1, "DataTransferSaslClientInternal::logBuffer Begin");
     std::cout << std::hex<<std::setfill('0');
     std::cout << std::showbase;
     std::cout << std::uppercase;
-    for(int index=0; index< buffer.size(); index++)
+    for(size_t index=0; index< buffer.size(); index++)
     {
         std::cout<<"["<<std::setw(2)<<static_cast<int>(static_cast<unsigned char>(buffer[index]))<<"]";
         if((index+1) % 10 == 0){
-            std::cout<<endl;
+            std::cout<<std::endl;
         } else {
             std::cout<<" ";
         }
@@ -222,6 +223,7 @@ static void logBuffer(std::vector<char> & buffer){
     std::cout << std::nouppercase;
     //LOG(DEBUG1, "DataTransferSaslClientInternal::logBuffer End");
 }
+#endif
 
 void DataTransferSaslClientInternal::sendSaslMessage()
 {
@@ -438,7 +440,7 @@ std::shared_ptr<Socket> DataTransferSaslClientInternal::doHandshake(){
     std::string identifier;
     std::string password;
     if(dataEncryptionKey.getKeyId()> 0 && !dataEncryptionKey.getEncryptionAlgorithm().empty()){
-        stringstream ss;
+        std::stringstream ss;
         ss<<static_cast<int32_t>(dataEncryptionKey.getKeyId())<<" ";
         ss<<dataEncryptionKey.getBlockPoolId()<<" ";
         ss<<base64Encode(dataEncryptionKey.getNonce());
