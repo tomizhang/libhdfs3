@@ -206,7 +206,7 @@ public:
 
 static void TestInputOutputStream(FileSystem & fs) {
     OutputStream out;
-    ASSERT_NO_THROW(DebugException(out.open(fs, BASE_DIR "file", Create, 0644, true, 0, 1024)));
+    ASSERT_NO_THROW(DebugException(out.open(fs, BASE_DIR "file", Create, 0644, true, 0, 0)));
     std::vector<char> buffer(1024 * 3 + 1);
     FillBuffer(&buffer[0], buffer.size(), 0);
     ASSERT_NO_THROW(DebugException(out.append(&buffer[0], buffer.size())));
@@ -249,7 +249,7 @@ static void ExtractHostPort(const std::string & uri, std::string & host,
         ss << uri;
     }
 
-    FileSystemKey key(ss.str(), NULL);
+    FileSystemKey key(ss.str(), "");
     host = key.getHost();
     port = key.getPort();
 }

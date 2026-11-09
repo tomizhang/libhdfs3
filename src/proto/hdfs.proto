@@ -24,7 +24,8 @@
 
 // This file contains protocol buffers that are used throughout HDFS -- i.e.
 // by the client, server, and data transfer protocols.
-syntax = "proto2";
+
+
 option java_package = "org.apache.hadoop.hdfs.protocol.proto";
 option java_outer_classname = "HdfsProtos";
 option java_generate_equals_and_hash = true;
@@ -39,7 +40,7 @@ message ExtendedBlockProto {
   required string poolId = 1;   // Block pool id - gloablly unique across clusters
   required uint64 blockId = 2;  // the local id within a pool
   required uint64 generationStamp = 3;
-  optional uint64 numBytes = 4 [default = 0];  // len does not belong in ebid
+  optional uint64 numBytes = 4 [default = 0];  // len does not belong in ebid 
                                                // here for historical reasons
 }
 
@@ -127,7 +128,7 @@ enum StorageTypeProto {
 }
 
 /**
- * A list of storage IDs.
+ * A list of storage IDs. 
  */
 message StorageUuidsProto {
   repeated string storageUuids = 1;
@@ -135,23 +136,19 @@ message StorageUuidsProto {
 
 /**
  * A LocatedBlock gives information about a block and its location.
- */
+ */ 
 message LocatedBlockProto {
   required ExtendedBlockProto b  = 1;
   required uint64 offset = 2;           // offset of first byte of block in the file
   repeated DatanodeInfoProto locs = 3;  // Locations ordered by proximity to client ip
   required bool corrupt = 4;            // true if all replicas of a block are corrupt, else false
-                                        // If block has few corrupt replicas, they are filtered and
+                                        // If block has few corrupt replicas, they are filtered and 
                                         // their locations are not part of this object
 
   required TokenProto blockToken = 5;
   repeated bool isCached = 6 [packed=true]; // if a location in locs is cached
   repeated StorageTypeProto storageTypes = 7;
   repeated string storageIDs = 8;
-
-  // striped block related fields
-  optional bytes blockIndices = 9; // used for striped block to indicate block index for each storage
-  repeated TokenProto blockTokens = 10; // each internal block has a block token
 }
 
 message DataEncryptionKeyProto {
@@ -163,46 +160,6 @@ message DataEncryptionKeyProto {
   optional string encryptionAlgorithm = 6;
 }
 
-/**
- * ECSchema options entry
- */
-message ECSchemaOptionEntryProto {
-  required string key = 1;
-  required string value = 2;
-}
-
-/**
- * ECSchema for erasurecoding
- */
-message ECSchemaProto {
-  required string codecName = 1;
-  required uint32 dataUnits = 2;
-  required uint32 parityUnits = 3;
-  repeated ECSchemaOptionEntryProto options = 4;
-}
-
-/**
- * EC policy state.
- */
-enum ErasureCodingPolicyState {
-  DISABLED = 1;
-  ENABLED = 2;
-  REMOVED = 3;
-}
-
-message ErasureCodingPolicyProto {
-  optional string name = 1;
-  optional ECSchemaProto schema = 2;
-  optional uint32 cellSize = 3;
-  required uint32 id = 4; // Actually a byte - only 8 bits used
-  optional ErasureCodingPolicyState state = 5 [default = ENABLED];
-}
-
-message AddErasureCodingPolicyResponseProto {
-  required ErasureCodingPolicyProto policy = 1;
-  required bool succeed = 2;
-  optional string errorMsg = 3;
-}
 
 /**
  * A set of file blocks and their locations.
@@ -213,9 +170,6 @@ message LocatedBlocksProto {
   required bool underConstruction = 3;
   optional LocatedBlockProto lastBlock = 4;
   required bool isLastBlockComplete = 5;
-
-  // Optional field for erasure coding
-  optional ErasureCodingPolicyProto ecPolicy = 7;
 }
 
 
@@ -239,7 +193,7 @@ message HdfsFileStatusProto {
   required uint64 access_time = 8;
 
   // Optional fields for symlink
-  optional bytes symlink = 9;             // if symlink, target encoded java UTF8
+  optional bytes symlink = 9;             // if symlink, target encoded java UTF8 
 
   // Optional fields for file
   optional uint32 block_replication = 10 [default = 0]; // only 16bits used
@@ -249,10 +203,7 @@ message HdfsFileStatusProto {
   // Optional field for fileId
   optional uint64 fileId = 13 [default = 0]; // default as an invalid id
   optional int32 childrenNum = 14 [default = -1];
-
-  // Optional field for erasure coding
-  optional ErasureCodingPolicyProto ecPolicy = 17;
-}
+} 
 
 /**
  * Checksum algorithms/types used in HDFS
@@ -289,9 +240,9 @@ message DirectoryListingProto {
 }
 
 /**
- * Status of a snapshottable directory: besides the normal information for
+ * Status of a snapshottable directory: besides the normal information for 
  * a directory status, also include snapshot quota, number of snapshots, and
- * the full path of the parent directory.
+ * the full path of the parent directory. 
  */
 message SnapshottableDirectoryStatusProto {
   required HdfsFileStatusProto dirStatus = 1;
@@ -384,7 +335,7 @@ message NamenodeCommandProto {
  */
 message CheckpointCommandProto {
   // Unique signature to identify checkpoint transation
-  required CheckpointSignatureProto signature = 1;
+  required CheckpointSignatureProto signature = 1; 
 
   // If true, return transfer image to primary upon the completion of checkpoint
   required bool needToReturnImage = 2;
@@ -508,3 +459,21 @@ message SnapshotInfoProto {
   // TODO: do we need access time?
 }
 
+/**
+ * Cipher suite.
+ */
+enum CipherSuiteProto {
+    CIPHER_SUITE_UNKNOWN = 1;
+    AES_CTR_NOPADDING = 2;
+}
+
+/**
+ * Cipher option
+ */
+message CipherOptionProto {
+  required CipherSuiteProto suite = 1;
+  optional bytes inKey = 2;
+  optional bytes inIv = 3;
+  optional bytes outKey = 4;
+  optional bytes outIv = 5;
+}

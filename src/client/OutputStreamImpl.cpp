@@ -38,32 +38,23 @@
 #include "Packet.h"
 #include "PacketHeader.h"
 #include "SWCrc32c.h"
-#include "IntelAsmCrc32c.h"
 
 #include <cassert>
-#include <memory>
 #include <inttypes.h>
 
 namespace Hdfs {
 namespace Internal {
 
 OutputStreamImpl::OutputStreamImpl() :
-/*heartBeatStop(true),*/ packets(0), closed(true), isAppend(false), syncBlock(false), checksumSize(0), chunkSize(
+/*heartBeatStop(true),*/ closed(true), isAppend(false), syncBlock(false), checksumSize(0), chunkSize(
         0), chunksPerPacket(0), closeTimeout(0), heartBeatInterval(0), packetSize(0), position(
             0), replication(0), blockSize(0), bytesWritten(0), cursor(0), lastFlushed(
-                0), nextSeqNo(0) {
-#if defined(__SSE4_2__) && defined(__LP64__) &&!defined(__APPLE__)
-    checksum = std::make_shared<IntelAsmCrc32c>();
-#else
-#if !(((defined(__PPC64__) || defined(__powerpc64__)) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)) || (defined(__s390x__)))
+                0), nextSeqNo(0), packets(0) {
     if (HWCrc32c::available()) {
         checksum = shared_ptr < Checksum > (new HWCrc32c());
-    } else
-#endif
-    {
+    } else {
         checksum = shared_ptr < Checksum > (new SWCrc32c());
     }
-#endif
 
     checksumSize = sizeof(int32_t);
     lastSend = steady_clock::now();
@@ -105,17 +96,15 @@ void OutputStreamImpl::setError(const exception_ptr & error) {
  * To create or append a file.
  * @param fs hdfs file system.
  * @param path the file path.
- * @param pair the result of create or append.
  * @param flag creation flag, can be Create, Append or Create|Overwrite.
  * @param permission create a new file with given permission.
  * @param createParent if the parent does not exist, create it.
  * @param replication create a file with given number of replication.
  * @param blockSize  create a file with given block size.
  */
-void OutputStreamImpl::open(shared_ptr<FileSystemInter> fs, const char * path,
-                            std::pair<shared_ptr<LocatedBlock>, shared_ptr<Hdfs::FileStatus>> & pair,
-                            int flag, const Permission & permission, bool createParent, int replication,
-                            int64_t blockSize, int64_t fileId) {
+void OutputStreamImpl::open(shared_ptr<FileSystemInter> fs, const char * path, int flag,
+                            const Permission & permission, bool createParent, int replication,
+                            int64_t blockSize) {
     if (NULL == path || 0 == strlen(path) || replication < 0 || blockSize < 0) {
         THROW(InvalidParameter, "Invalid parameter.");
     }
@@ -130,28 +119,8 @@ void OutputStreamImpl::open(shared_ptr<FileSystemInter> fs, const char * path,
     }
 
     try {
-        openInternal(fs, path, pair, flag, permission, createParent, replication,
-                     blockSize, fileId);
-
-        do {
-            try {
-                //append
-                if (flag & Append) {
-                    initAppend(pair);
-                    LeaseRenewer::GetLeaseRenewer().StartRenew(filesystem);
-                    break;
-                }
-            } catch (const FileNotFoundException & e) {
-                if (!(flag & Create)) {
-                    throw;
-                }
-            }
-            //create
-            assert((flag & Create) || (flag & Overwrite));
-            closed = false;
-            computePacketChunkSize();
-            LeaseRenewer::GetLeaseRenewer().StartRenew(filesystem);
-        } while(0);
+        openInternal(fs, path, flag, permission, createParent, replication,
+                     blockSize);
     } catch (...) {
         reset();
         throw;
@@ -169,9 +138,10 @@ void OutputStreamImpl::computePacketChunkSize() {
     buffer.resize(chunkSize);
 }
 
-void OutputStreamImpl::initAppend(
-        std::pair<shared_ptr<LocatedBlock>, shared_ptr<FileStatus>> & lastBlockWithStatus) {
+void OutputStreamImpl::initAppend() {
     FileStatus fileInfo;
+    std::pair<shared_ptr<LocatedBlock>, shared_ptr<FileStatus> > lastBlockWithStatus;
+    lastBlockWithStatus = filesystem->append(this->path);
     lastBlock = lastBlockWithStatus.first;
 
     if (lastBlockWithStatus.second) {
@@ -230,16 +200,14 @@ void OutputStreamImpl::initAppend(
 }
 
 void OutputStreamImpl::openInternal(shared_ptr<FileSystemInter> fs, const char * path,
-                                    std::pair<shared_ptr<LocatedBlock>, shared_ptr<Hdfs::FileStatus>> & pair,
                                     int flag, const Permission & permission, bool createParent,
-                                    int replication, int64_t blockSize, int64_t fileId) {
+                                    int replication, int64_t blockSize) {
     filesystem = fs;
     this->path = fs->getStandardPath(path);
-    this->fileId = fileId;
     this->replication = replication;
     this->blockSize = blockSize;
     syncBlock = flag & SyncBlock;
-    conf = shared_ptr < SessionConfig > (new SessionConfig(fs->getConf()));
+    conf = shared_ptr<SessionConfig> (new SessionConfig(fs->getConf()));
     LOG(DEBUG2, "open file %s for %s", this->path.c_str(), (flag & Append ? "append" : "write"));
     packets.setMaxSize(conf->getPacketPoolSize());
 
@@ -271,6 +239,25 @@ void OutputStreamImpl::openInternal(shared_ptr<FileSystemInter> fs, const char *
               "OutputStreamImpl: block size %" PRId64 " is not the multiply of chunk size %d.",
               this->blockSize, chunkSize);
     }
+
+    try {
+        if (flag & Append) {
+            initAppend();
+            LeaseRenewer::GetLeaseRenewer().StartRenew(filesystem);
+            return;
+        }
+    } catch (const FileNotFoundException & e) {
+        if (!(flag & Create)) {
+            throw;
+        }
+    }
+
+    assert((flag & Create) || (flag & Overwrite));
+    fs->create(this->path, permission, flag, createParent, this->replication,
+               this->blockSize);
+    closed = false;
+    computePacketChunkSize();
+    LeaseRenewer::GetLeaseRenewer().StartRenew(filesystem);
 }
 
 /**
@@ -312,11 +299,11 @@ void OutputStreamImpl::appendInternal(const char * buf, int64_t size) {
             checksum->reset();
         } else {
             checksum->update(buf + size - todo, batch);
-            memcpy(buffer.data() + position, buf + size - todo, batch);
+            memcpy(&buffer[position], buf + size - todo, batch);
             position += batch;
 
             if (position == static_cast<int>(buffer.size())) {
-                appendChunkToPacket(buffer.data(), buffer.size());
+                appendChunkToPacket(&buffer[0], buffer.size());
                 bytesWritten += buffer.size();
                 checksum->reset();
                 position = 0;
@@ -375,7 +362,7 @@ void OutputStreamImpl::setupPipeline() {
 #else
     pipeline = shared_ptr<Pipeline>(new PipelineImpl(isAppend, path.c_str(), *conf, filesystem,
                                     CHECKSUM_TYPE_CRC32C, conf->getDefaultChunkSize(), replication,
-                                    currentPacket->getOffsetInBlock(), packets, lastBlock, fileId));
+                                    currentPacket->getOffsetInBlock(), packets, lastBlock));
 #endif
     lastSend = steady_clock::now();
     /*
@@ -415,7 +402,7 @@ void OutputStreamImpl::flushInternal(bool needSync) {
     }
 
     if (position > 0) {
-        appendChunkToPacket(buffer.data(), position);
+        appendChunkToPacket(&buffer[0], position);
     }
 
     /*
@@ -470,7 +457,7 @@ void OutputStreamImpl::completeFile(bool throwError) {
     while (true) {
         try {
             bool success;
-            success = filesystem->complete(path, lastBlock.get(), fileId);
+            success = filesystem->complete(path, lastBlock.get());
 
             if (success) {
                 return;
@@ -546,7 +533,7 @@ void OutputStreamImpl::close() {
         //pipeline may be broken
         if (!lastError) {
             if (lastFlushed != cursor && position > 0) {
-                appendChunkToPacket(buffer.data(), position);
+                appendChunkToPacket(&buffer[0], position);
             }
 
             if (lastFlushed != cursor && currentPacket) {

@@ -29,7 +29,6 @@
 
 #include "Logger.h"
 
-#include <atomic>
 #include <cassert>
 #include <cstdarg>
 #include <cstdio>
@@ -56,11 +55,9 @@ const char * SeverityName[] = { "FATAL", "ERROR", "WARNING", "INFO", "DEBUG1",
                               };
 
 static void InitProcessId() {
-    /// A sequential thread number instead of `pthread_self`, which is a stack address.
-    static std::atomic<uint64_t> thread_count{0};
     std::stringstream ss;
     ss.imbue(std::locale::classic());
-    ss << "p" << getpid() << ", th" << ++thread_count;
+    ss << "p" << getpid() << ", th" << pthread_self();
     snprintf(ProcessId, sizeof(ProcessId), "%s", ss.str().c_str());
 }
 
@@ -76,7 +73,7 @@ void Logger::setOutputFd(int f) {
 }
 
 void Logger::setLogSeverity(LogSeverity l) {
-    severity.store(l, std::memory_order_relaxed);
+    severity = l;
 }
 
 void Logger::printf(LogSeverity s, const char * fmt, ...) {
@@ -84,12 +81,6 @@ void Logger::printf(LogSeverity s, const char * fmt, ...) {
 
     if (s > severity || fd < 0) {
         return;
-    }
-
-    const char * enable_logging_env = std::getenv("HDFS_ENABLE_LOGGING");
-    bool enable_logging = false;
-    if (enable_logging_env) {
-        enable_logging = std::string(enable_logging_env) == "true";
     }
 
     try {
@@ -102,20 +93,18 @@ void Logger::printf(LogSeverity s, const char * fmt, ...) {
         localtime_r(&tval.tv_sec, &tm_time);
         //determine buffer size
         va_start(ap, fmt);
-        int size = vsnprintf(nullptr, 0, fmt, ap);
+        int size = vsnprintf(&buffer[0], buffer.size(), fmt, ap);
         va_end(ap);
         //100 is enough for prefix
         buffer.resize(size + 100);
-        size = snprintf(buffer.data(), buffer.size(), "%04d-%02d-%02d %02d:%02d:%02d.%06ld, %s, %s ", tm_time.tm_year + 1900,
+        size = snprintf(&buffer[0], buffer.size(), "%04d-%02d-%02d %02d:%02d:%02d.%06ld, %s, %s ", tm_time.tm_year + 1900,
                         1 + tm_time.tm_mon, tm_time.tm_mday, tm_time.tm_hour,
                         tm_time.tm_min, tm_time.tm_sec, static_cast<long>(tval.tv_usec), ProcessId, SeverityName[s]);
         va_start(ap, fmt);
-        size += vsnprintf(buffer.data() + size, buffer.size() - size, fmt, ap);
+        size += vsnprintf(&buffer[size], buffer.size() - size, fmt, ap);
         va_end(ap);
-        if (enable_logging) {
-            lock_guard<mutex> lock(LoggerMutex);
-            dprintf(fd, "%s\n", buffer.data());
-        }
+        lock_guard<mutex> lock(LoggerMutex);
+        dprintf(fd, "%s\n", &buffer[0]);
         return;
     } catch (const std::exception & e) {
         dprintf(fd, "%s:%d %s %s", __FILE__, __LINE__,
@@ -126,3 +115,4 @@ void Logger::printf(LogSeverity s, const char * fmt, ...) {
 
 }
 }
+

@@ -116,7 +116,6 @@ TEST(TestException, NestedErrorDetails) {
             NESTED_THROW(HdfsException, "nested HdfsException");
         }
     } catch (const HdfsException & e) {
-        std::string buffer;
-        std::cout << GetExceptionDetail(e, buffer) << std::endl;
+        std::cout << GetExceptionDetail(e) << std::endl;
     }
 }

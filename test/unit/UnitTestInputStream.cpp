@@ -66,14 +66,8 @@ public:
     MOCK_CONST_METHOD0(isUnderConstruction, bool ());
     MOCK_METHOD1(setUnderConstruction, void (bool underConstruction));
     MOCK_METHOD1(findBlock, LocatedBlock * (int64_t position));
-    MOCK_METHOD2(findBlock, LocatedBlock * (int64_t position, int32_t & targetBlockIdx));
     MOCK_METHOD0(getBlocks, std::vector<LocatedBlock> & ());
     MOCK_METHOD1(setLastBlock, void(shared_ptr<LocatedBlock>));
-    MOCK_CONST_METHOD0(getEcPolicy, shared_ptr<ECPolicy> ());
-    MOCK_METHOD1(setEcPolicy, void (shared_ptr<ECPolicy>));
-    MOCK_METHOD2(insertRange, void (int32_t blockIdx, std::vector<LocatedBlock> & newBlocks));
-    MOCK_METHOD5(addAll, void (std::vector<LocatedBlock> & oldBlocks, int32_t index, std::vector<LocatedBlock> & newBlocks,
-            int32_t start, int32_t end));
 };
 
 class MockDatanodeStub: public TestDatanodeStub {
@@ -87,10 +81,10 @@ TEST(InputStreamTest, ReadBlockLength_Success) {
     LocatedBlock b;
     shared_ptr<MockDatanode> datanode(new MockDatanode());
     MockDatanodeStub stub;
-    LockVector<DatanodeInfo> dfv;
+    std::vector<DatanodeInfo> dfv;
     DatanodeInfo df;
     dfv.push_back(df);
-    b.locs = dfv.get();
+    b.locs = dfv;
     ins.stub = &stub;
     EXPECT_CALL(stub, getDatanode()).Times(1).WillOnce(Return(datanode));
     EXPECT_CALL(*datanode, getReplicaVisibleLength(_)).Times(1).WillOnce(Return(2));
@@ -102,10 +96,10 @@ TEST(InputStreamTest, ReadBlockLength_Fail) {
     shared_ptr<MockDatanode> datanode(new MockDatanode());
     MockDatanodeStub stub;
     LocatedBlock b;
-    LockVector<DatanodeInfo> dfv;
+    std::vector<DatanodeInfo> dfv;
     DatanodeInfo df1;
     dfv.push_back(df1);
-    b.locs = dfv.get();
+    b.locs = dfv;
     ins.stub = &stub;
     EXPECT_CALL(stub, getDatanode()).Times(1).WillOnce(Return(datanode));
     EXPECT_CALL(*datanode, getReplicaVisibleLength(_)).Times(1).WillOnce(Return(-1));
@@ -117,12 +111,12 @@ TEST(InputStreamTest, ReadBlockLength_FailTry) {
     shared_ptr<MockDatanode> datanode(new MockDatanode());
     MockDatanodeStub stub;
     LocatedBlock b;
-    LockVector<DatanodeInfo> dfv;
+    std::vector<DatanodeInfo> dfv;
     DatanodeInfo df1;
     DatanodeInfo df2;
     dfv.push_back(df1);
     dfv.push_back(df2);
-    b.locs = dfv.get();
+    b.locs = dfv;
     ins.stub = &stub;
     EXPECT_CALL(stub, getDatanode()).Times(2).WillOnce(Return(datanode)).WillOnce(Return(datanode));
     EXPECT_CALL(*datanode, getReplicaVisibleLength(_)).Times(2).WillOnce(Return(-1)).WillOnce(
@@ -135,12 +129,12 @@ TEST(InputStreamTest, ReadBlockLength_ThrowTry) {
     shared_ptr<MockDatanode> datanode(new MockDatanode());
     MockDatanodeStub stub;
     LocatedBlock b;
-    LockVector<DatanodeInfo> dfv;
+    std::vector<DatanodeInfo> dfv;
     DatanodeInfo df1;
     DatanodeInfo df2;
     dfv.push_back(df1);
     dfv.push_back(df2);
-    b.locs = dfv.get();
+    b.locs = dfv;
     ins.stub = &stub;
     Hdfs::ReplicaNotFoundException e("test", "test", 2, "test");
     EXPECT_CALL(stub, getDatanode()).Times(2).WillOnce(Return(datanode)).WillOnce(Return(datanode));
@@ -175,10 +169,10 @@ TEST(InputStreamTest, UpdateBlockInfos_NotLastComplete) {
     MockDatanodeStub stub;
     ins.stub = &stub;
     shared_ptr<LocatedBlock> block(new LocatedBlock);
-    LockVector<DatanodeInfo> dfv;
+    std::vector<DatanodeInfo> dfv;
     DatanodeInfo df;
     dfv.push_back(df);
-    block->setLocations(dfv.get());
+    block->setLocations(dfv);
     EXPECT_CALL(*fs, getBlockLocations(_, _, _, _)).WillOnce(Return());
     EXPECT_CALL(*lbs, isLastBlockComplete()).WillOnce(Return(false));
     EXPECT_CALL(*lbs, getLastBlock()).WillOnce(Return(block));
@@ -205,12 +199,12 @@ TEST(InputStreamTest, UpdateBlockInfos_TrowAndTry) {
 TEST(InputStreamTest, ChoseBestNode_Success) {
     InputStreamImpl ins;
     LocatedBlock * lb = new LocatedBlock();
-    LockVector<DatanodeInfo> dfv;
+    std::vector<DatanodeInfo> dfv;
     DatanodeInfo df1;
     DatanodeInfo df2;
     dfv.push_back(df1);
     dfv.push_back(df2);
-    lb->locs = dfv.get();
+    lb->locs = dfv;
     ins.curBlock = shared_ptr < LocatedBlock > (lb);
     EXPECT_NO_THROW(ins.choseBestNode());
 }
@@ -218,14 +212,26 @@ TEST(InputStreamTest, ChoseBestNode_Success) {
 TEST(InputStreamTest, SetupBlockReader_Failed) {
     InputStreamImpl ins;
     LocatedBlock * lb = new LocatedBlock();
-    LockVector<DatanodeInfo> dfv;
+    std::vector<DatanodeInfo> dfv;
     DatanodeInfo df1;
     DatanodeInfo df2;
     dfv.push_back(df1);
     dfv.push_back(df2);
-    lb->locs = dfv.get();
+    lb->locs = dfv;
     ins.curBlock = shared_ptr < LocatedBlock > (lb);
-    std::vector<DatanodeInfo> tmp = dfv.get();
-    ins.failedNodes.set(tmp);
+    ins.failedNodes = dfv;
     EXPECT_THROW(ins.setupBlockReader(false), Hdfs::HdfsIOException);
+}
+
+TEST(InputStreamTest, Pread_ClosedStream_Throws) {
+    InputStreamImpl ins;
+    char buf[64];
+    EXPECT_THROW(ins.pread(buf, sizeof(buf), 0), Hdfs::HdfsIOException);
+}
+
+TEST(InputStreamTest, Pread_NegativePosition_Throws) {
+    InputStreamImpl ins;
+    ins.closed = false;
+    char buf[64];
+    EXPECT_THROW(ins.pread(buf, sizeof(buf), -1), Hdfs::InvalidParameter);
 }

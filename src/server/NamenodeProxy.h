@@ -47,12 +47,12 @@ public:
     void getBlockLocations(const std::string & src, int64_t offset,
                            int64_t length, LocatedBlocks & lbs);
 
-    FileStatus create(const std::string & src, const Permission & masked,
-                      const std::string & clientName, int flag, bool createParent,
-                      short replication, int64_t blockSize);
+    void create(const std::string & src, const Permission & masked,
+                const std::string & clientName, int flag, bool createParent,
+                short replication, int64_t blockSize);
 
     std::pair<shared_ptr<LocatedBlock>, shared_ptr<FileStatus> > append(
-        const std::string& src, const std::string& clientName, const uint32_t& flag);
+        const std::string& src, const std::string& clientName);
 
     bool setReplication(const std::string & src, short replication);
 
@@ -62,12 +62,11 @@ public:
                   const std::string & groupname);
 
     void abandonBlock(const ExtendedBlock & b, const std::string & src,
-                      const std::string & holder, int64_t fileId);
+                      const std::string & holder);
 
     shared_ptr<LocatedBlock> addBlock(const std::string & src,
                                       const std::string & clientName, const ExtendedBlock * previous,
-                                      const std::vector<DatanodeInfo> & excludeNodes,
-                                      int64_t fileId);
+                                      const std::vector<DatanodeInfo> & excludeNodes);
 
     shared_ptr<LocatedBlock> getAdditionalDatanode(const std::string & src,
             const ExtendedBlock & blk,
@@ -77,7 +76,7 @@ public:
             const std::string & clientName);
 
     bool complete(const std::string & src, const std::string & clientName,
-                  const ExtendedBlock * last, int64_t fileId);
+                  const ExtendedBlock * last);
 
     void reportBadBlocks(const std::vector<LocatedBlock> & blocks);
 
@@ -137,6 +136,8 @@ public:
                         const ExtendedBlock & oldBlock, const ExtendedBlock & newBlock,
                         const std::vector<DatanodeInfo> & newNodes,
                         const std::vector<std::string> & storageIDs);
+
+    DataEncryptionKey getDataEncryptionKey();
 
     Token getDelegationToken(const std::string & renewer);
 

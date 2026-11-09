@@ -39,7 +39,7 @@ RpcChannelKey::RpcChannelKey(const RpcAuth & a, const RpcProtocolInfo & p,
                          server.getTokenService());
 
     if (temp) {
-        token = shared_ptr<Token> (new Token(*temp));
+        token = std::shared_ptr<Token> (new Token(*temp));
     }
 }
 

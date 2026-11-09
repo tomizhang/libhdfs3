@@ -39,7 +39,9 @@ using namespace google::protobuf;
 namespace Hdfs {
 namespace Internal {
 
-static inline void Send(Socket & sock, DataTransferOp op, Message * msg,
+static inline void Send(std::shared_ptr<Socket> socket, 
+                        DataTransferOp op, 
+                        Message * msg,
                         int writeTimeout) {
     WriteBuffer buffer;
     buffer.writeBigEndian(static_cast<int16_t>(DATA_TRANSFER_VERSION));
@@ -47,13 +49,13 @@ static inline void Send(Socket & sock, DataTransferOp op, Message * msg,
     int msgSize = msg->ByteSize();
     buffer.writeVarint32(msgSize);
     char * b = buffer.alloc(msgSize);
-
+    
     if (!msg->SerializeToArray(b, msgSize)) {
         THROW(HdfsIOException,
               "DataTransferProtocolSender cannot serialize header to send buffer.");
     }
 
-    sock.writeFully(buffer.getBuffer(0), buffer.getDataSize(0), writeTimeout);
+    socket->writeFully(buffer.getBuffer(0), buffer.getDataSize(0), writeTimeout);
 }
 
 static inline void BuildBaseHeader(const ExtendedBlock & block,
@@ -96,13 +98,14 @@ static inline void BuildNodesInfo(const std::vector<DatanodeInfo> & nodes,
     }
 }
 
-DataTransferProtocolSender::DataTransferProtocolSender(Socket & sock,
-        int writeTimeout, const std::string & datanodeAddr) :
-    sock(sock), writeTimeout(writeTimeout), datanode(datanodeAddr) {
+DataTransferProtocolSender::DataTransferProtocolSender(
+        std::shared_ptr<Socket> socket,
+        int writeTimeout, 
+        const std::string & datanodeAddr):
+    socket(socket), writeTimeout(writeTimeout), datanode(datanodeAddr) {
 }
 
-DataTransferProtocolSender::~DataTransferProtocolSender() {
-}
+DataTransferProtocolSender::~DataTransferProtocolSender() = default;
 
 void DataTransferProtocolSender::readBlock(const ExtendedBlock & blk,
         const Token & blockToken, const char * clientName,
@@ -112,7 +115,7 @@ void DataTransferProtocolSender::readBlock(const ExtendedBlock & blk,
         op.set_len(length);
         op.set_offset(blockOffset);
         BuildClientHeader(blk, blockToken, clientName, op.mutable_header());
-        Send(sock, READ_BLOCK, &op, writeTimeout);
+        Send(socket, READ_BLOCK, &op, writeTimeout);
     } catch (const HdfsCanceled & e) {
         throw;
     } catch (const HdfsException & e) {
@@ -139,7 +142,7 @@ void DataTransferProtocolSender::writeBlock(const ExtendedBlock & blk,
         ck->set_bytesperchecksum(bytesPerChecksum);
         ck->set_type((ChecksumTypeProto) checksumType);
         BuildNodesInfo(targets, op.mutable_targets());
-        Send(sock, WRITE_BLOCK, &op, writeTimeout);
+        Send(socket, WRITE_BLOCK, &op, writeTimeout);
     } catch (const HdfsCanceled & e) {
         throw;
     } catch (const HdfsException & e) {
@@ -156,7 +159,7 @@ void DataTransferProtocolSender::transferBlock(const ExtendedBlock & blk,
         OpTransferBlockProto op;
         BuildClientHeader(blk, blockToken, clientName, op.mutable_header());
         BuildNodesInfo(targets, op.mutable_targets());
-        Send(sock, TRANSFER_BLOCK, &op, writeTimeout);
+        Send(socket, TRANSFER_BLOCK, &op, writeTimeout);
     } catch (const HdfsCanceled & e) {
         throw;
     } catch (const HdfsException & e) {
@@ -187,7 +190,7 @@ void DataTransferProtocolSender::requestShortCircuitFds(const ExtendedBlock blk,
         BuildBaseHeader(blk, blockToken, op.mutable_header());
         op.set_maxversion(maxVersion);
 
-        Send(sock, REQUEST_SHORT_CIRCUIT_FDS, &op, writeTimeout);
+        Send(socket, REQUEST_SHORT_CIRCUIT_FDS, &op, writeTimeout);
     } catch (const HdfsCanceled& e) {
         throw;
     } catch (const HdfsException& e) {

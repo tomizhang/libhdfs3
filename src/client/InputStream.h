@@ -29,7 +29,6 @@
 #define _HDFS_LIBHDFS3_CLIENT_INPUTSTREAM_H_
 
 #include "FileSystem.h"
-#include "server/LocatedBlocks.h"
 
 namespace Hdfs {
 namespace Internal {
@@ -42,8 +41,7 @@ class InputStreamInter;
 class InputStream {
 public:
     InputStream();
-    InputStream(Internal::shared_ptr<Internal::LocatedBlocks> lbs);
-    
+
     ~InputStream();
 
     /**
@@ -63,20 +61,13 @@ public:
     int32_t read(char * buf, int32_t size);
 
     /**
-    * To read data from hdfs.
-    * @param buf the buffer used to filled.
-    * @param size buffer size.
-    * @param position the position to seek.
-    * @return return the number of bytes filled in the buffer, it may less than size.
-    */
-    int32_t pread(char * buf, int32_t size, int64_t position);
-
-    /**
      * To read data from hdfs, block until get the given size of bytes.
      * @param buf the buffer used to filled.
      * @param size the number of bytes to be read.
      */
     void readFully(char * buf, int64_t size);
+
+    int32_t pread(char * buf, int32_t size, int64_t position);
 
     /**
      * Get how many bytes can be read without blocking.
@@ -100,6 +91,8 @@ public:
      * Close the stream.
      */
     void close();
+
+    void setHostname(const char *hostname);
 
 private:
     Internal::InputStreamInter * impl;

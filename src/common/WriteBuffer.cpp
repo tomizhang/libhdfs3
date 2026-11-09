@@ -66,7 +66,7 @@ char * WriteBuffer::alloc(size_t offset, size_t s) {
     }
 
     size = offset + s;
-    return buffer.data() + offset;
+    return &buffer[offset];
 }
 
 void WriteBuffer::write(const void * bytes, size_t s, size_t pos) {

@@ -25,14 +25,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "Exception.h"
-#include "ExceptionInternal.h"
-#include "Logger.h"
-#include "Memory.h"
 #include "RpcClient.h"
-#include "Thread.h"
 
-#include <boost/uuid/uuid_generators.hpp>
+#include "common/ClientId.h"
+#include "common/Memory.h"
+#include "common/Thread.h"
+#include "common/Logger.h"
+#include "common/Exception.h"
+#include "common/ExceptionInternal.h"
 
 namespace Hdfs {
 namespace Internal {
@@ -51,10 +51,7 @@ RpcClient & RpcClient::getClient() {
 }
 
 RpcClientImpl::RpcClientImpl() :
-    cleaning(false), running(true), count(0) {
-    auto id = boost::uuids::random_generator()();
-    clientId.resize(boost::uuids::uuid::static_size());
-    memcpy(clientId.data(), id.begin(), boost::uuids::uuid::static_size());
+    cleaning(false), running(true), count(0), clientId(GenerateClientId()) {
 #ifdef MOCK
     stub = NULL;
 #endif
@@ -102,9 +99,8 @@ void RpcClientImpl::clean() {
             }
         }
     } catch (const Hdfs::HdfsException & e) {
-        std::string buffer;
         LOG(LOG_ERROR, "RpcClientImpl's idle cleaner exit: %s",
-            GetExceptionDetail(e, buffer));
+            GetExceptionDetail(e));
     } catch (const std::exception & e) {
         LOG(LOG_ERROR, "RpcClientImpl's idle cleaner exit: %s", e.what());
     }

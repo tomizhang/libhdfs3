@@ -33,6 +33,7 @@
 namespace Hdfs {
 namespace Internal {
 
+class RpcChannel;
 class RpcClient;
 
 }

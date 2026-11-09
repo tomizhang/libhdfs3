@@ -1,7 +1,8 @@
-FROM --platform=linux/arm64 almalinux:8
+# Dockerfile to build ARM64 libhdfs3.so with glibc 2.28 using AlmaLinux 8
+FROM almalinux:8
 
 RUN dnf install -y epel-release 'dnf-command(config-manager)' && \
-    (dnf config-manager --set-enabled powertools || dnf config-manager --set-enabled crb || true) && \
+    dnf config-manager --set-enabled powertools || dnf config-manager --set-enabled crb || true && \
     dnf install -y \
         gcc \
         gcc-c++ \
@@ -13,14 +14,10 @@ RUN dnf install -y epel-release 'dnf-command(config-manager)' && \
         krb5-devel \
         libuuid-devel \
         libgsasl-devel \
+        openssl-devel \
         boost-devel \
     && dnf clean all
 
 WORKDIR /workspace
-COPY . /workspace
 
-RUN mkdir -p build && cd build \
-    && cmake .. -DCMAKE_BUILD_TYPE=Release \
-    && make -j$(nproc) libhdfs3-shared
-
-CMD ["cp", "-f", "build/src/libhdfs3.so", "/output/"]
+CMD ["/bin/bash", "-c", "mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc) libhdfs3-shared"]

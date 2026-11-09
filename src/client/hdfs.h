@@ -210,14 +210,6 @@ void hdfsBuilderSetNameNodePort(struct hdfsBuilder * bld, tPort port);
 void hdfsBuilderSetUserName(struct hdfsBuilder * bld, const char * userName);
 
 /**
- * Set the Kerberos principal to use when connecting to the HDFS cluster.
- *
- * @param bld The HDFS builder
- * @param principal The Kerberos principal.  The string will be shallow-copied.
- */
-void hdfsBuilderSetPrincipal(struct hdfsBuilder * bld, const char * principal);
-
-/**
  * Set the path to the Kerberos ticket cache to use when connecting to
  * the HDFS cluster.
  *
@@ -319,6 +311,9 @@ int hdfsDisconnect(hdfsFS fs);
 hdfsFile hdfsOpenFile(hdfsFS fs, const char * path, int flags, int bufferSize,
                       short replication, tOffset blocksize);
 
+hdfsFile hdfsOpenFile2(hdfsFS fs, const char *datanode, const char * path, int flags, int bufferSize,
+                      short replication, tOffset blocksize);
+
 /**
  * hdfsCloseFile - Close an open file.
  * @param fs The configured filesystem handle.
@@ -330,6 +325,23 @@ hdfsFile hdfsOpenFile(hdfsFS fs, const char * path, int flags, int bufferSize,
  *         error.
  */
 int hdfsCloseFile(hdfsFS fs, hdfsFile file);
+#define HAVE_HDFS_PREAD 1
+
+/**
+ * hdfsPread - Positional read from an open file.
+ * Unlike hdfsRead+hdfsSeek, this does not move the file position and is
+ * thread-safe: multiple threads may call hdfsPread concurrently on the same
+ * file handle as long as the sequential hdfsRead/hdfsSeek path is not active.
+ * @param fs The configured filesystem handle.
+ * @param file The file handle opened in read-only mode.
+ * @param position Byte offset in the file to read from.
+ * @param buffer Destination buffer.
+ * @param length Number of bytes to read.
+ * @return Number of bytes read (may be less than length only at EOF),
+ *         0 if position >= file length, -1 on error with errno set.
+ */
+tSize hdfsPread(hdfsFS fs, hdfsFile file, tOffset position, void * buffer, tSize length);
+
 
 /**
  * hdfsExists - Checks if a given path exsits on the filesystem
@@ -372,23 +384,6 @@ tOffset hdfsTell(hdfsFS fs, hdfsFile file);
  *              but we are not yet at the end of the file.
  */
 tSize hdfsRead(hdfsFS fs, hdfsFile file, void * buffer, tSize length);
-
-/**
- * hdfsRead - Positional read data from an open file.
- * @param fs The configured filesystem handle.
- * @param file The file handle.
- * @param buffer The buffer to copy read bytes into.
- * @param length The length of the buffer.
- * @param position The position in the input stream to seek
- * @return      On success, a positive number indicating how many bytes
- *              were read.
- *              On end-of-file, 0.
- *              On error, -1.  Errno will be set to the error code.
- *              Just like the POSIX read function, hdfsRead will return -1
- *              and set errno to EINTR if data is temporarily unavailable,
- *              but we are not yet at the end of the file.
- */
-tSize hdfsPread(hdfsFS fs, hdfsFile file, void * buffer, tSize length, tOffset position);
 
 /**
  * hdfsWrite - Write data into an open file.
@@ -570,8 +565,8 @@ void hdfsFreeFileInfo(hdfsFileInfo * infos, int numEntries);
  * @return Returns a dynamically-allocated 2-d array of blocks-hosts;
  * NULL on error.
  */
-char ***hdfsGetHosts(hdfsFS fs, const char *path, tOffset start,
-                     tOffset length);
+char ** * hdfsGetHosts(hdfsFS fs, const char * path, tOffset start,
+                       tOffset length);
 
 /**
  * hdfsFreeHosts - Free up the structure returned by hdfsGetHosts
@@ -579,7 +574,7 @@ char ***hdfsGetHosts(hdfsFS fs, const char *path, tOffset start,
  * objects.
  * @param numEntries The size of the array.
  */
-void hdfsFreeHosts(char ***blockHosts);
+void hdfsFreeHosts(char ** *blockHosts);
 
 /**
  * hdfsGetDefaultBlockSize - Get the default blocksize.
@@ -754,12 +749,17 @@ BlockLocation * hdfsGetFileBlockLocations(hdfsFS fs, const char * path,
  */
 void hdfsFreeFileBlockLocations(BlockLocation * locations, int numOfBlock);
 
+const char* hdfsGetVersion();
+
+const char* hdfsGetGSaslVersion();
+
 /**
- * Release unused memory back to the operating system (e.g. via malloc_trim).
- * Highly recommended in long-running processes or managed runtimes (ASP.NET Core, DuckDB)
- * to prevent glibc arena memory explosion on Linux.
+ * Explicitly release free heap memory back to the operating system.
+ * Useful in managed runtimes (such as ASP.NET Core) after high-concurrency I/O.
+ *
+ * @return 1 if memory was released, 0 otherwise.
  */
-void hdfsReleaseMemory(void);
+int hdfsReleaseMemory();
 
 #ifdef __cplusplus
 }

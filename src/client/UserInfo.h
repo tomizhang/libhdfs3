@@ -31,11 +31,11 @@
 #include <map>
 #include <string>
 
-#include "Hash.h"
-#include "KerberosName.h"
+#include "common/Hash.h"
+#include "client/KerberosName.h"
 #include "Token.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 
 namespace Hdfs {
 namespace Internal {
@@ -45,8 +45,17 @@ public:
     UserInfo() {
     }
 
-    explicit UserInfo(const std::string & u) :
-        effectiveUser(u) {
+    explicit UserInfo(const std::string & u) {
+        //LOG(DEBUG1, "UserInfo->U: %s", u.c_str());
+        this->effectiveUser = KerberosName(u);
+        //LOG(DEBUG1, "UserInfo->Name: %s", this->effectiveUser.getName().c_str());
+        //LOG(DEBUG1, "UserInfo->Host: %s", this->effectiveUser.getHost().c_str());
+        //LOG(DEBUG1, "UserInfo->Realm: %s", this->effectiveUser.getRealm().c_str());
+        //LOG(DEBUG1, "UserInfo->Principal: %s", this->effectiveUser.getPrincipal().c_str());
+    }
+
+    explicit UserInfo(const std::string & u, const std::string & k) :
+        effectiveUser(u), keytab(k) {
     }
 
     const std::string & getRealUser() const {
@@ -67,6 +76,10 @@ public:
 
     std::string getPrincipal() const {
         return effectiveUser.getPrincipal();
+    }
+
+    std::string getKeytab() const {
+        return keytab;
     }
 
     bool operator ==(const UserInfo & other) const {
@@ -98,6 +111,7 @@ private:
     KerberosName effectiveUser;
     std::map<std::pair<std::string, std::string>, Token> tokens;
     std::string realUser;
+    std::string keytab;
 };
 
 }

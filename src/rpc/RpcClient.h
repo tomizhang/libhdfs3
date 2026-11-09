@@ -28,7 +28,9 @@
 #ifndef _HDFS_LIBHDFS3_RPC_RPCCLIENT_H_
 #define _HDFS_LIBHDFS3_RPC_RPCCLIENT_H_
 
-#include "Memory.h"
+#include "common/Memory.h"
+#include "common/Thread.h"
+#include "common/Unordered.h"
 #include "RpcAuth.h"
 #include "RpcCall.h"
 #include "RpcChannel.h"
@@ -36,8 +38,6 @@
 #include "RpcConfig.h"
 #include "RpcProtocolInfo.h"
 #include "RpcServerInfo.h"
-#include "Thread.h"
-#include "Unordered.h"
 
 #include <vector>
 
@@ -47,6 +47,8 @@
 
 namespace Hdfs {
 namespace Internal {
+
+class RpcChannel;
 
 class RpcClient {
 public:
@@ -65,7 +67,8 @@ public:
      * @param once If true, the RPC channel will not be reused.
      */
     virtual RpcChannel & getChannel(const RpcAuth & auth,
-                                    const RpcProtocolInfo & protocol, const RpcServerInfo & server,
+                                    const RpcProtocolInfo & protocol, 
+                                    const RpcServerInfo & server,
                                     const RpcConfig & conf) = 0;
 
     /**

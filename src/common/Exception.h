@@ -268,6 +268,17 @@ public:
     static const char * ReflexName;
 };
 
+class HdfsInvalidEncryptionKey: public HdfsIOException {
+public:
+    HdfsInvalidEncryptionKey(const std::string & arg, const char * file, int line,
+                              const char * stack) :
+        HdfsIOException(arg, file, line, stack) {
+    }
+
+    ~HdfsInvalidEncryptionKey() throw () {
+    }
+};
+
 /**
  * This will wrap HdfsNetworkConnectionException and HdfsTimeoutException.
  * This exception will be caught and attempt will be performed to recover in HA case.

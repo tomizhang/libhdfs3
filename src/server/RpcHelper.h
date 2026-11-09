@@ -32,15 +32,14 @@
 #include "client/Permission.h"
 #include "ClientDatanodeProtocol.pb.h"
 #include "ClientNamenodeProtocol.pb.h"
+#include "DataEncryptionKey.h"
 #include "DatanodeInfo.h"
-#include "Exception.h"
-#include "ExceptionInternal.h"
+#include "common/Exception.h"
+#include "common/ExceptionInternal.h"
 #include "ExtendedBlock.h"
 #include "LocatedBlock.h"
 #include "LocatedBlocks.h"
-#include "StackPrinter.h"
-#include "client/ECPolicy.h"
-#include "client/SystemECPolicies.h"
+#include "common/StackPrinter.h"
 
 #include <algorithm>
 #include <cassert>
@@ -128,40 +127,8 @@ static inline void Convert(DatanodeInfo & node,
 }
 
 static inline shared_ptr<LocatedBlock> Convert(const LocatedBlockProto & proto) {
-    shared_ptr<LocatedBlock> lb(new LocatedBlock);
-    if (proto.has_blockindices()) {
-        if (static_cast<int>(proto.blockindices().size()) != proto.locs_size()) {
-            THROW(HdfsIOException,
-                  "Invalid LocatedBlockProto from Namenode: the number of block indices (%d) "
-                  "does not match the number of locations (%d)",
-                  static_cast<int>(proto.blockindices().size()), proto.locs_size());
-        }
-        if (proto.storageids_size() != proto.locs_size()) {
-            THROW(HdfsIOException,
-                  "Invalid LocatedBlockProto from Namenode: the number of storage IDs (%d) "
-                  "does not match the number of locations (%d) for a striped block",
-                  proto.storageids_size(), proto.locs_size());
-        }
-        lb->setStriped(true);
-        std::vector<int8_t> & indeces = lb->mutableIndices();
-        indeces.resize(proto.blockindices().size());
-        for (int i = 0; i < static_cast<int>(proto.blockindices().size()); ++i) {
-            indeces[i] = ((int8_t)proto.blockindices()[i]);
-            if (indeces[i] < 0) {
-                THROW(HdfsIOException,
-                      "Invalid LocatedBlockProto from Namenode: negative block index %d",
-                      static_cast<int>(indeces[i]));
-            }
-        }
-        std::vector<Token> & tokens = lb->mutableTokens();
-        tokens.resize(proto.blocktokens_size());
-        for (int i = 0; i < proto.blocktokens_size(); ++i) {
-            Token token;
-            Convert(token, proto.blocktokens(i));
-            tokens[i] = token;
-        }
-    }
     Token token;
+    shared_ptr<LocatedBlock> lb(new LocatedBlock);
     Convert(token, proto.blocktoken());
     lb->setToken(token);
     std::vector<DatanodeInfo> & nodes = lb->mutableLocations();
@@ -171,30 +138,12 @@ static inline shared_ptr<LocatedBlock> Convert(const LocatedBlockProto & proto) 
         Convert(nodes[i], proto.locs(i));
     }
 
-    if (proto.storagetypes_size() != 0 && proto.storagetypes_size() != proto.locs_size()) {
-        THROW(HdfsIOException,
-              "Invalid LocatedBlockProto from Namenode: the number of storage types (%d) "
-              "does not match the number of locations (%d)",
-              proto.storagetypes_size(), proto.locs_size());
-    }
-
-    /*
-     * Storage IDs are indexed in parallel with locations by the consumers
-     * (pipeline recovery, striped block parsing), so they must be either
-     * absent or have exactly one entry per location.
-     */
-    if (proto.storageids_size() != 0 && proto.storageids_size() != proto.locs_size()) {
-        THROW(HdfsIOException,
-              "Invalid LocatedBlockProto from Namenode: the number of storage IDs (%d) "
-              "does not match the number of locations (%d)",
-              proto.storageids_size(), proto.locs_size());
-    }
-
-    if (proto.storageids_size() > 0) {
+    if (proto.storagetypes_size() > 0) {
+        assert(proto.storagetypes_size() == proto.locs_size());
         std::vector<std::string> & storageIDs = lb->mutableStorageIDs();
-        storageIDs.resize(proto.storageids_size());
+        storageIDs.resize(proto.storagetypes_size());
 
-        for (int i = 0; i < proto.storageids_size(); ++i) {
+        for (int i = 0; i < proto.storagetypes_size(); ++i) {
             storageIDs[i] = proto.storageids(i);
         }
     }
@@ -203,26 +152,6 @@ static inline shared_ptr<LocatedBlock> Convert(const LocatedBlockProto & proto) 
     lb->setOffset(proto.offset());
     lb->setCorrupt(proto.corrupt());
     return lb;
-}
-
-static inline void Convert(LocatedBlocks & lbs, 
-                           const ErasureCodingPolicyProto & proto) {
-    int8_t id = (int8_t)(proto.id() & 0xFF);
-    SystemECPolicies & sysPolicy = SystemECPolicies::getInstance();
-    shared_ptr<ECPolicy> policy = sysPolicy.getById(id);
-    if (policy != nullptr) {
-        lbs.setEcPolicy(policy);
-    } else {
-        policy = shared_ptr<ECPolicy>(new ECPolicy());
-        policy->setId(id);
-        policy->setName(proto.name().c_str());
-        policy->setCellSize(proto.cellsize());
-        policy->setCodecName(proto.schema().codecname().c_str());
-        policy->setNumDataUnits(proto.schema().dataunits());
-        policy->setNumParityUnits(proto.schema().parityunits());
-        sysPolicy.addEcPolicy(proto.id(), policy);
-        lbs.setEcPolicy(policy);
-    }
 }
 
 static inline void Convert(LocatedBlocks & lbs,
@@ -245,29 +174,6 @@ static inline void Convert(LocatedBlocks & lbs,
     }
 
     std::sort(blocks.begin(), blocks.end(), std::less<LocatedBlock>());
-    if (proto.has_ecpolicy()) {
-        Convert(lbs, proto.ecpolicy());
-    }
-}
-
-static inline void Convert(FileStatus & fs,
-                           const ErasureCodingPolicyProto & proto) {
-    int8_t id = (int8_t)(proto.id() & 0xFF);
-    SystemECPolicies & sysPolicy = SystemECPolicies::getInstance();
-    shared_ptr<ECPolicy> policy = sysPolicy.getById(id);
-    if (policy != nullptr) {
-        fs.setEcPolicy(policy);
-    } else {
-        policy = shared_ptr<ECPolicy>(new ECPolicy());
-        policy->setId(id);
-        policy->setName(proto.name().c_str());
-        policy->setCellSize(proto.cellsize());
-        policy->setCodecName(proto.schema().codecname().c_str());
-        policy->setNumDataUnits(proto.schema().dataunits());
-        policy->setNumParityUnits(proto.schema().parityunits());
-        sysPolicy.addEcPolicy(proto.id(), policy);
-        fs.setEcPolicy(policy);
-    }
 }
 
 static inline void Convert(const std::string & src, FileStatus & fs,
@@ -283,10 +189,6 @@ static inline void Convert(const std::string & src, FileStatus & fs,
     fs.setSymlink(proto.symlink().c_str());
     fs.setPermission(Permission(proto.permission().perm()));
     fs.setIsdir(proto.filetype() == HdfsFileStatusProto::IS_DIR);
-    fs.setFileId(proto.fileid());
-    if (proto.has_ecpolicy()) {
-        Convert(fs, proto.ecpolicy());
-    }
 }
 
 static inline void Convert(const std::string & src,
@@ -299,6 +201,17 @@ static inline void Convert(const std::string & src,
         Convert(src, fileStatus, ptrproto.Get(i));
         dl.push_back(fileStatus);
     }
+}
+
+static inline DataEncryptionKey Convert(const DataEncryptionKeyProto & proto) {
+    DataEncryptionKey retval;
+    retval.setKeyId(proto.keyid());
+    retval.setBlockPoolId(proto.blockpoolid());
+    retval.setNonce(proto.nonce());
+    retval.setEncryptionKey(proto.encryptionkey());
+    retval.setExpiryDate(proto.expirydate());
+    retval.setEncryptionAlgorithm(proto.encryptionalgorithm());
+    return retval;
 }
 
 static inline Token Convert(const TokenProto & proto) {

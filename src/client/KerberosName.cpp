@@ -29,6 +29,7 @@
 
 #include "Exception.h"
 #include "ExceptionInternal.h"
+#include "../common/Logger.h"
 
 #include <regex.h>
 #include <string.h>
@@ -37,11 +38,13 @@
 namespace Hdfs {
 namespace Internal {
 
-static void HandleRegError(int rc, const regex_t * comp) {
+namespace {
+
+static void HandleRegError(int rc, regex_t * comp) {
     std::vector<char> buffer;
     size_t size = regerror(rc, comp, NULL, 0);
     buffer.resize(size + 1);
-    regerror(rc, comp, buffer.data(), buffer.size());
+    regerror(rc, comp, &buffer[0], buffer.size());
     THROW(HdfsIOException, "KerberosName: Failed to parse Kerberos principal.");
 }
 
@@ -49,29 +52,31 @@ class KerberosRegex {
 public:
     KerberosRegex() {
         static const char * pattern = "([^/@]*)(/([^/@]*))?@([^/@]*)";
-        memset(&reg, 0, sizeof(reg));
-        int rc = regcomp(&reg, pattern, REG_EXTENDED);
+        memset(&comp, 0, sizeof(regex_t));
+        int rc = regcomp(&comp, pattern, REG_EXTENDED);
         if (rc) {
-            HandleRegError(rc, &reg);
+            HandleRegError(rc, &comp);
         }
     }
 
     ~KerberosRegex() {
-        regfree(&reg);
+        regfree(&comp);
     }
 
     const regex_t * get() const {
-        return &reg;
+        return &comp;
     }
 
 private:
-    regex_t reg;
+    regex_t comp;
 };
 
-static const regex_t * GetKerberosRegex() {
-    static const KerberosRegex regexInstance;
-    return regexInstance.get();
+static const KerberosRegex & GetKerberosRegex() {
+    static KerberosRegex regex;
+    return regex;
 }
+
+} // namespace
 
 KerberosName::KerberosName() {
 }
@@ -85,15 +90,15 @@ void KerberosName::parse(const std::string & principal) {
         return;
     }
 
-    const regex_t * comp = GetKerberosRegex();
+    const regex_t * comp = GetKerberosRegex().get();
     regmatch_t pmatch[5];
     memset(pmatch, 0, sizeof(pmatch));
 
     int rc = regexec(comp, principal.c_str(),
-                     sizeof(pmatch) / sizeof(pmatch[0]), pmatch, 0);
+                     sizeof(pmatch) / sizeof(pmatch[1]), pmatch, 0);
 
     if (rc && rc != REG_NOMATCH) {
-        HandleRegError(rc, comp);
+        HandleRegError(rc, const_cast<regex_t *>(comp));
     }
 
     if (rc == REG_NOMATCH) {

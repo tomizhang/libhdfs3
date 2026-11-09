@@ -186,14 +186,18 @@ Config::Config(const char * p) :
 }
 
 void Config::update(const char * p) {
+    char msg[64];
     xmlDocPtr doc; /* the resulting document tree */
     LIBXML_TEST_VERSION
     kv.clear();
     path = p;
 
+    //printf("Read from xml config: %s\n", path.c_str());
+
     if (access(path.c_str(), R_OK)) {
+        strerror_r(errno, msg, sizeof(msg));
         THROW(HdfsBadConfigFoumat, "Cannot read configure file: \"%s\", %s",
-              path.c_str(), GetSystemErrorInfo(errno));
+              path.c_str(), msg);
     }
 
     /* parse the file */
@@ -390,7 +394,7 @@ size_t Config::hash_value() const {
         values.push_back(StringHasher(s->second));
     }
 
-    return CombineHasher(values.data(), values.size());
+    return CombineHasher(&values[0], values.size());
 }
 
 }

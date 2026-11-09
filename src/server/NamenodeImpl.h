@@ -46,16 +46,16 @@ public:
              FileNotFoundException, UnresolvedLinkException,
              HdfsIOException) */;
 
-    FileStatus create(const std::string & src, const Permission & masked,
-                      const std::string & clientName, int flag, bool createParent,
-                      short replication, int64_t blockSize) /* throw (AccessControlException,
+    void create(const std::string & src, const Permission & masked,
+                const std::string & clientName, int flag, bool createParent,
+                short replication, int64_t blockSize) /* throw (AccessControlException,
              AlreadyBeingCreatedException, DSQuotaExceededException,
              FileAlreadyExistsException, FileNotFoundException,
              NSQuotaExceededException, ParentNotDirectoryException,
              SafeModeException, UnresolvedLinkException, HdfsIOException) */;
 
     std::pair<shared_ptr<LocatedBlock>, shared_ptr<FileStatus> > append(
-        const std::string& src, const std::string& clientName, const uint32_t& flag)
+        const std::string& src, const std::string& clientName)
         /* throw (AccessControlException,
              DSQuotaExceededException, FileNotFoundException,
              SafeModeException, UnresolvedLinkException, HdfsIOException) */;
@@ -78,15 +78,13 @@ public:
              UnresolvedLinkException, HdfsIOException) */;
 
     void abandonBlock(const ExtendedBlock & b, const std::string & src,
-                      const std::string & holder, int64_t fileId) 
-             /* throw (AccessControlException,
+                      const std::string & holder) /* throw (AccessControlException,
              FileNotFoundException, UnresolvedLinkException,
              HdfsIOException) */;
 
     shared_ptr<LocatedBlock> addBlock(const std::string & src, const std::string & clientName,
                                       const ExtendedBlock * previous,
-                                      const std::vector<DatanodeInfo> & excludeNodes,
-                                      int64_t fileId)
+                                      const std::vector<DatanodeInfo> & excludeNodes)
     /* throw (AccessControlException, FileNotFoundException,
      NotReplicatedYetException, SafeModeException,
      UnresolvedLinkException, HdfsIOException) */;
@@ -102,7 +100,7 @@ public:
      SafeModeException, UnresolvedLinkException, HdfsIOException) */;
 
     bool complete(const std::string & src, const std::string & clientName,
-                  const ExtendedBlock * last, int64_t fileId) /* throw (AccessControlException,
+                  const ExtendedBlock * last) /* throw (AccessControlException,
              FileNotFoundException, SafeModeException,
              UnresolvedLinkException, HdfsIOException) */;
 
@@ -213,6 +211,8 @@ public:
                         const ExtendedBlock & oldBlock, const ExtendedBlock & newBlock,
                         const std::vector<DatanodeInfo> & newNodes,
                         const std::vector<std::string> & storageIDs) /* throw (HdfsIOException) */;
+
+    DataEncryptionKey getDataEncryptionKey();
 
     //Idempotent
     Token getDelegationToken(const std::string & renewer)

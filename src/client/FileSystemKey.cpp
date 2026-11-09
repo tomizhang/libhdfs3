@@ -28,6 +28,7 @@
 #include "Exception.h"
 #include "ExceptionInternal.h"
 #include "FileSystemKey.h"
+#include "../common/Logger.h"
 
 #include <algorithm>
 #include <libxml/uri.h>
@@ -36,7 +37,10 @@
 namespace Hdfs {
 namespace Internal {
 
-FileSystemKey::FileSystemKey(const std::string & uri, const char * u) {
+FileSystemKey::FileSystemKey(const std::string & uri, const std::string & u) {
+    //LOG(DEBUG1, "FileSystemKey::FileSystemKey->uri: %s", uri.c_str());
+    //LOG(DEBUG1, "FileSystemKey::FileSystemKey->u: %s", u.c_str());
+
     xmlURIPtr uriobj;
     std::stringstream ss;
     ss.imbue(std::locale::classic());
@@ -61,7 +65,7 @@ FileSystemKey::FileSystemKey(const std::string & uri, const char * u) {
                   "Invalid input: uri is not a valid URI type.");
         }
 
-        if (u && strlen(u) > 0) {
+        if (!u.empty()) {
             user = UserInfo(u);
         } else if (NULL == uriobj->user || 0 == strlen(uriobj->user)) {
             user = UserInfo::LocalUser();
@@ -82,6 +86,8 @@ FileSystemKey::FileSystemKey(const std::string & uri, const char * u) {
         }
 
         authority = ss.str();
+
+        //LOG(DEBUG1, "FileSystemKey::FileSystemKey->authority: %s", authority.c_str());
     } catch (...) {
         if (uriobj) {
             xmlFreeURI(uriobj);

@@ -28,13 +28,13 @@
 #ifndef _HDFS_LIBHDFS3_RPC_RPCREMOTECALL_
 #define _HDFS_LIBHDFS3_RPC_RPCREMOTECALL_
 
-#include "DateTime.h"
-#include "ExceptionInternal.h"
-#include "Memory.h"
+#include "common/DateTime.h"
+#include "common/ExceptionInternal.h"
+#include "common/Memory.h"
 #include "RpcCall.h"
 #include "RpcProtocolInfo.h"
-#include "Thread.h"
-#include "WriteBuffer.h"
+#include "common/Thread.h"
+#include "common/WriteBuffer.h"
 
 #define INVALID_RETRY_COUNT -1
 

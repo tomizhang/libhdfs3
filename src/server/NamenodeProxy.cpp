@@ -76,15 +76,7 @@ static uint32_t GetInitNamenodeIndex(const std::string id) {
         /*
          * created file, initialize it with 0
          */
-        if (write(fd, &index, sizeof(index)) < 0) {
-          LOG(WARNING,
-              "NamenodeProxy: Failed to write current Namenode index into "
-              "cache file.");
-            /*
-             * ignore the failure.
-             */
-        }
-
+        write(fd, &index, sizeof(index));
         flock(fd, LOCK_UN);
         close(fd);
         return index;
@@ -134,14 +126,7 @@ static void SetInitNamenodeIndex(const std::string & id, uint32_t index) {
             return;
         }
 
-        if (write(fd, &index, sizeof(index)) < 0) {
-            LOG(WARNING,
-                "NamenodeProxy: Failed to write current Namenode index into "
-                "cache file.");
-            /*
-             * ignore the failure.
-             */
-        }
+        write(fd, &index, sizeof(index));
         flock(fd, LOCK_UN);
         close(fd);
     }
@@ -246,18 +231,18 @@ void NamenodeProxy::getBlockLocations(const std::string & src, int64_t offset,
     NAMENODE_HA_RETRY_END();
 }
 
-FileStatus NamenodeProxy::create(const std::string & src, const Permission & masked,
-                                 const std::string & clientName, int flag, bool createParent,
-                                 short replication, int64_t blockSize) {
+void NamenodeProxy::create(const std::string & src, const Permission & masked,
+                           const std::string & clientName, int flag, bool createParent,
+                           short replication, int64_t blockSize) {
     NAMENODE_HA_RETRY_BEGIN();
-    return namenode->create(src, masked, clientName, flag, createParent, replication, blockSize);
+    namenode->create(src, masked, clientName, flag, createParent, replication, blockSize);
     NAMENODE_HA_RETRY_END();
 }
 
 std::pair<shared_ptr<LocatedBlock>, shared_ptr<FileStatus> >
-NamenodeProxy::append(const std::string& src, const std::string& clientName, const uint32_t& flag) {
+NamenodeProxy::append(const std::string& src, const std::string& clientName) {
     NAMENODE_HA_RETRY_BEGIN();
-    return namenode->append(src, clientName, flag);
+    return namenode->append(src, clientName);
     NAMENODE_HA_RETRY_END();
     assert(!"should not reach here");
     return std::pair<shared_ptr<LocatedBlock>, shared_ptr<FileStatus> >();
@@ -285,18 +270,18 @@ void NamenodeProxy::setOwner(const std::string & src,
     NAMENODE_HA_RETRY_END();
 }
 
-void NamenodeProxy::abandonBlock(const ExtendedBlock & b, const std::string & src,
-                                 const std::string & holder, int64_t fileId) {
+void NamenodeProxy::abandonBlock(const ExtendedBlock & b,
+                                 const std::string & src, const std::string & holder) {
     NAMENODE_HA_RETRY_BEGIN();
-    namenode->abandonBlock(b, src, holder, fileId);
+    namenode->abandonBlock(b, src, holder);
     NAMENODE_HA_RETRY_END();
 }
 
 shared_ptr<LocatedBlock> NamenodeProxy::addBlock(const std::string & src,
         const std::string & clientName, const ExtendedBlock * previous,
-        const std::vector<DatanodeInfo> & excludeNodes, int64_t fileId) {
+        const std::vector<DatanodeInfo> & excludeNodes) {
     NAMENODE_HA_RETRY_BEGIN();
-    return namenode->addBlock(src, clientName, previous, excludeNodes, fileId);
+    return namenode->addBlock(src, clientName, previous, excludeNodes);
     NAMENODE_HA_RETRY_END();
     assert(!"should not reach here");
     return shared_ptr<LocatedBlock>();
@@ -317,9 +302,9 @@ shared_ptr<LocatedBlock> NamenodeProxy::getAdditionalDatanode(
 }
 
 bool NamenodeProxy::complete(const std::string & src,
-                             const std::string & clientName, const ExtendedBlock * last, int64_t fileId) {
+                             const std::string & clientName, const ExtendedBlock * last) {
     NAMENODE_HA_RETRY_BEGIN();
-    return namenode->complete(src, clientName, last, fileId);
+    return namenode->complete(src, clientName, last);
     NAMENODE_HA_RETRY_END();
     assert(!"should not reach here");
     return false;
@@ -501,6 +486,14 @@ void NamenodeProxy::updatePipeline(const std::string & clientName,
     NAMENODE_HA_RETRY_BEGIN();
     namenode->updatePipeline(clientName, oldBlock, newBlock, newNodes, storageIDs);
     NAMENODE_HA_RETRY_END();
+}
+
+DataEncryptionKey NamenodeProxy::getDataEncryptionKey() {
+    NAMENODE_HA_RETRY_BEGIN();
+    return namenode->getDataEncryptionKey();
+    NAMENODE_HA_RETRY_END();
+    assert(!"should not reach here");
+    return DataEncryptionKey();
 }
 
 Token NamenodeProxy::getDelegationToken(const std::string & renewer) {

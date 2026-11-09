@@ -28,13 +28,13 @@
 #ifndef _HDFS_LIBHDFS3_RPC_RPCCHANNELKEY_H_
 #define _HDFS_LIBHDFS3_RPC_RPCCHANNELKEY_H_
 
+#include "common/Memory.h"
 #include "client/Token.h"
-#include "Hash.h"
+#include "common/Hash.h"
 #include "RpcAuth.h"
 #include "RpcConfig.h"
 #include "RpcProtocolInfo.h"
 #include "RpcServerInfo.h"
-#include <Memory.h>
 
 namespace Hdfs {
 namespace Internal {
@@ -75,7 +75,7 @@ public:
         return *token;
     }
 
-    bool hasToken() {
+    bool hasToken() const {
         return token != NULL;
     }
 
@@ -84,7 +84,7 @@ private:
     const RpcConfig conf;
     const RpcProtocolInfo protocol;
     const RpcServerInfo server;
-    shared_ptr<Token> token;
+    std::shared_ptr<Token> token;
 };
 
 }

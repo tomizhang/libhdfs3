@@ -139,10 +139,6 @@ public:
         return maxLocalBlockInfoCacheSize;
     }
 
-    bool connectViaHostname() const {
-        return connectToDnViaHostname;
-    }
-
     /*
      * OutputStream configure
      */
@@ -198,6 +194,46 @@ public:
 
     void setRpcAuthMethod(const std::string & rpcAuthMethod) {
         this->rpcAuthMethod = rpcAuthMethod;
+    }
+
+    const std::string & getNameServices() const {
+        return nameservices;
+    }
+
+    void setNameServices(const std::string & nameservices) {
+        this->nameservices = nameservices;
+    }
+
+    const std::string & getNamenodeKerberosPrincipal() const {
+        return nnKerberosPrincipal;
+    }
+
+    void setNamenodeKerberosPrincipal(const std::string & nnKerberosPrincipal) {
+        this->nnKerberosPrincipal = nnKerberosPrincipal;
+    }
+
+    const std::string & getNamenodeKerberosKeytabFile() const {
+        return nnKerberosKeytabFile;
+    }
+
+    void setNamenodeKerberosKeytabFile(const std::string & nnKerberosKeytabFile) {
+        this->nnKerberosKeytabFile = nnKerberosKeytabFile;
+    }
+
+    const std::string & getDatanodeKerberosPrincipal() const {
+        return dnKerberosPrincipal;
+    }
+
+    void setDatanodeKerberosPrincipal(const std::string & dnKerberosPrincipal) {
+        this->dnKerberosPrincipal = dnKerberosPrincipal;
+    }
+
+    const std::string & getDatanodeKerberosKeytabFile() const {
+        return dnKerberosKeytabFile;
+    }
+
+    void setDatanodeKerberosKeytabFile(const std::string & dnKerberosKeytabFile) {
+        this->dnKerberosKeytabFile = dnKerberosKeytabFile;
     }
 
     const std::string & getKerberosCachePath() const {
@@ -304,43 +340,31 @@ public:
     }
 
     int32_t getSocketCacheExpiry() const {
-      return socketCacheExpiry;
+        return socketCacheExpiry;
     }
 
     int32_t getSocketCacheCapacity() const {
-      return socketCacheCapacity;
+        return socketCacheCapacity;
     }
 
-    int32_t getStripeReaderThreadPoolSize() const {
-        return stripeReaderThreadPoolSize;
+    bool isDfsEncryptDataTransfer() const {
+        return dfsEncryptDataTransfer;
     }
 
-    bool isReadWriteMetricEnabled() const {
-        return readWriteMetricEnabled;
+    const std::string & getDfsDataTransferProtection() const {
+        return dfsDataTransferProtection;
     }
 
-    bool isSlowDatanodeKickoutEnabled() const {
-        return slowDatanodeKickoutEnabled;
+    const std::string & getDfsEncryptDataTransferAlgorithm() const {
+        return dfsEncryptDataTransferAlgorithm;
     }
 
-    int32_t getSlowCacheSizeMax() const {
-        return slowCacheSizeMax;
+    const std::string & getDfsEncryptDataTransferCipherSuites() const {
+        return dfsEncryptDataTransferCipherSuites;
     }
 
-    int64_t getSlowCacheExpirationMs() const {
-        return slowCacheExpirationMs;
-    }
-
-    int64_t getSlowDownstreamWarningThresholdMs() const {
-        return slowDownstreamWarningThresholdMs;
-    }
-
-    int64_t getSlowDownstreamWarningCount() const {
-        return slowDownstreamWarningCount;
-    }
-
-    int64_t getSlowDownstreamWarningIntervalSeconds() const {
-        return slowDownstreamWarningIntervalSeconds;
+    int32_t getDfsEncryptDataTransferCipherKeyBitlength() const {
+        return dfsEncryptDataTransferCipherKeyBitlength;
     }
 
 public:
@@ -363,15 +387,24 @@ public:
      * FileSystem configure
      */
     std::string defaultUri;
+    std::string nameservices;
+    std::string nnKerberosPrincipal;
+    std::string nnKerberosKeytabFile;
+    std::string dnKerberosPrincipal;
+    std::string dnKerberosKeytabFile;
     std::string kerberosCachePath;
     std::string logSeverity;
     int32_t defaultReplica;
     int64_t defaultBlockSize;
+    bool dfsEncryptDataTransfer;
+    std::string dfsDataTransferProtection;
+    std::string dfsEncryptDataTransferAlgorithm;
+    std::string dfsEncryptDataTransferCipherSuites;
+    int32_t dfsEncryptDataTransferCipherKeyBitlength;
 
     /*
      * InputStream configure
      */
-    bool connectToDnViaHostname;
     bool useMappedFile;
     bool readFromLocal;
     bool notRetryAnotherNode;
@@ -388,14 +421,6 @@ public:
     int32_t socketCacheCapacity;
     int32_t socketCacheExpiry;
     std::string domainSocketPath;
-    int32_t stripeReaderThreadPoolSize;
-    bool readWriteMetricEnabled;
-    bool slowDatanodeKickoutEnabled;
-    int32_t slowCacheSizeMax;
-    int64_t slowCacheExpirationMs;
-    int64_t slowDownstreamWarningThresholdMs;
-    int64_t slowDownstreamWarningCount;
-    int64_t slowDownstreamWarningIntervalSeconds;
 
     /*
      * OutputStream configure
@@ -410,6 +435,8 @@ public:
     int32_t packetPoolSize;
     int32_t heartBeatInterval;
     int32_t closeFileTimeout;
+
+
 
 };
 

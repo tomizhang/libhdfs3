@@ -43,7 +43,8 @@
 #include "server/LocatedBlocks.h"
 #include "SessionConfig.h"
 #include "Unordered.h"
-#include "LockVector.h"
+
+#include <string>
 
 #ifdef MOCK
 #include "TestDatanodeStub.h"
@@ -52,15 +53,12 @@
 namespace Hdfs {
 namespace Internal {
 
-class SlowNodeTracker;
-
 /**
  * A input stream used read data from hdfs.
  */
 class InputStreamImpl: public InputStreamInter {
 public:
     InputStreamImpl();
-    explicit InputStreamImpl(shared_ptr<LocatedBlocks> lbs); 
     ~InputStreamImpl();
 
     /**
@@ -80,20 +78,13 @@ public:
     int32_t read(char * buf, int32_t size);
 
     /**
-     * To read data from hdfs.
-     * @param buf the buffer used to filled.
-     * @param size buffer size.
-     * @param position the position to seek.
-     * @return return the number of bytes filled in the buffer, it may less than size.
-     */
-    int32_t pread(char * buf, int32_t size, int64_t position);
-
-    /**
      * To read data from hdfs, block until get the given size of bytes.
      * @param buf the buffer used to filled.
      * @param size the number of bytes to be read.
      */
     void readFully(char * buf, int64_t size);
+
+    int32_t pread(char * buf, int32_t size, int64_t position);
 
     int64_t available();
 
@@ -121,21 +112,12 @@ public:
      */
     std::string toString();
 
-protected:
+    void setHostname(std::string hostname);
+
+private:
     bool choseBestNode();
     bool isLocalNode();
-    bool isLocalNode(DatanodeInfo & curNode);
     int32_t readInternal(char * buf, int32_t size);
-    int32_t preadInternal(char * buf, int32_t size, int64_t position);
-    std::vector<shared_ptr<LocatedBlock>> getBlockRange(int64_t offset, int64_t length);
-    std::vector<shared_ptr<LocatedBlock>> getFinalizedBlockRange(int64_t offset, int64_t length);
-    shared_ptr<LocatedBlock> fetchBlockAt(int64_t offset, int64_t length, bool useCache);
-    virtual void fetchBlockByteRange(shared_ptr<LocatedBlock> curBlock, int64_t start, int64_t end, char * buf);
-    void setupBlockReader(bool temporaryDisableLocalRead, shared_ptr<BlockReader> & blockReader,
-                          shared_ptr<LocatedBlock> curBlock, int64_t start, int64_t end,
-                          DatanodeInfo & curNode);
-    bool choseBestNode(shared_ptr<LocatedBlock> curBlock, DatanodeInfo & curNode);
-    const LocatedBlock * findBlockWithLock();
     int32_t readOneBlock(char * buf, int32_t size, bool shouldUpdateMetadataOnFailure);
     int64_t getFileLength();
     int64_t readBlockLength(const LocatedBlock & b);
@@ -147,18 +129,8 @@ protected:
     void seekToBlock(const LocatedBlock & lb);
     void setupBlockReader(bool temporaryDisableLocalRead);
     void updateBlockInfos();
-    void updateBlockInfos(bool need);
 
-    /**
-     * Get block at the specified position.
-     * Fetch it from the namenode if not cached.
-     *
-     * @param offset block corresponding to this offset in file is returned
-     * @return located block
-     */
-    shared_ptr<LocatedBlock> getBlockAt(int64_t offset);
-
-protected:
+private:
     bool closed;
     bool localRead;
     bool readFromUnderConstructedBlock;
@@ -171,29 +143,27 @@ protected:
     int64_t endOfCurBlock;
     int64_t lastBlockBeingWrittenLength;
     int64_t prefetchSize;
+    int64_t readLimit;
     PeerCache *peerCache;
     RpcAuth auth;
     shared_ptr<BlockReader> blockReader;
     shared_ptr<FileSystemInter> filesystem;
     shared_ptr<LocatedBlock> curBlock;
-    // state shared by stateful and positional read:
-    // (protected by mutex on infoMutex)
     shared_ptr<LocatedBlocks> lbs;
     shared_ptr<SessionConfig> conf;
-    shared_ptr<SlowNodeTracker> slowNodeTracker;
     std::string path;
-    LockVector<DatanodeInfo> failedNodes;
+    std::vector<DatanodeInfo> failedNodes;
     std::vector<char> localReaderBuffer;
-    // mutex for state shared between read and pread
-    std::recursive_mutex infoMutex;
+    std::string hostname;
+    mutex preadMutex;
+    shared_ptr<LocatedBlocks> preadLbs;
+    int64_t preadLastBlockBeingWrittenLength;
 
 #ifdef MOCK
 private:
     Hdfs::Mock::TestDatanodeStub * stub;
 #endif
 };
-
-unordered_set<std::string> BuildLocalAddrSet();
 
 }
 }

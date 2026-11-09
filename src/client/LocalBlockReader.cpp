@@ -32,7 +32,6 @@
 #include "HWCrc32c.h"
 #include "LocalBlockReader.h"
 #include "SWCrc32c.h"
-#include "IntelAsmCrc32c.h"
 
 #include <inttypes.h>
 #include <limits>
@@ -67,7 +66,7 @@ LocalBlockReader::LocalBlockReader(const shared_ptr<ReadShortCircuitInfo>& info,
 
         std::vector<char> header;
         pMetaBuffer = metaFd->read(header, HEADER_SIZE);
-        int16_t version = ReadBigEndian16FromArray(pMetaBuffer);
+        int16_t version = ReadBigEndian16FromArray(&pMetaBuffer[0]);
 
         if (BMVERSION != version) {
             THROW(HdfsIOException,
@@ -83,19 +82,16 @@ LocalBlockReader::LocalBlockReader(const shared_ptr<ReadShortCircuitInfo>& info,
             break;
 
         case ChecksumTypeProto::CHECKSUM_CRC32:
+            THROW(HdfsIOException,
+                  "LocalBlockReader does not support CRC32 checksum.");
+            break;
+
         case ChecksumTypeProto::CHECKSUM_CRC32C:
-#if defined(__SSE4_2__) && defined(__LP64__) &&!defined(__APPLE__)
-            checksum = std::make_shared<IntelAsmCrc32c>();
-#else
-#if !(((defined(__PPC64__) || defined(__powerpc64__)) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)) || (defined(__s390x__)))
             if (HWCrc32c::available()) {
                 checksum = shared_ptr<Checksum>(new HWCrc32c());
-            } else
-#endif
-            {
+            } else {
                 checksum = shared_ptr<Checksum>(new SWCrc32c());
             }
-#endif
 
             chunkSize = ReadBigEndian32FromArray(
                             &pMetaBuffer[BMVERSION_SIZE + CHECKSUM_TYPE_SIZE]);

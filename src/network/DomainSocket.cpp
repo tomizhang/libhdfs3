@@ -119,7 +119,7 @@ int32_t DomainSocketImpl::receiveFileDescriptors(int fds[], size_t nfds,
   memset(&msg, 0, sizeof(msg));
   msg.msg_iov = &iov[0];
   msg.msg_iovlen = 1;
-  msg.msg_control = aux.data();
+  msg.msg_control = &aux[0];
   msg.msg_controllen = aux.size();
   cmsg = CMSG_FIRSTHDR(&msg);
   cmsg->cmsg_level = SOL_SOCKET;
@@ -137,13 +137,13 @@ int32_t DomainSocketImpl::receiveFileDescriptors(int fds[], size_t nfds,
   }
 
   if (0 == rc) {
-    THROW_NO_STACK(HdfsEndOfStream,
+    THROW(HdfsEndOfStream,
           "Read file descriptors failed from %s: End of the stream",
           remoteAddr.c_str());
   }
 
   if (msg.msg_controllen != cmsg->cmsg_len) {
-    THROW_NO_STACK(HdfsEndOfStream, "Read file descriptors failed from %s.",
+    THROW(HdfsEndOfStream, "Read file descriptors failed from %s.",
           remoteAddr.c_str());
   }
 

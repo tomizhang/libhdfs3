@@ -28,6 +28,11 @@ To build libhdfs3, the following libraries are needed.
     kerberos                        http://web.mit.edu/kerberos/
     libgsasl                        http://www.gnu.org/software/gsasl/
 
+To run tests, the following libraries are needed.
+
+    gtest (tested on 1.7.0)         already integrated in the source code
+    gmock (tested on 1.7.0)         already integrated in the source code
+
 To run code coverage test, the following tools are needed.
 
     gcov (included in gcc distribution)
@@ -56,6 +61,18 @@ Run command to build
 To build concurrently, rum make with -j option.
 
     make -j8
+
+#### Build from Docker image
+
+This repository contains a Docker image file that serves as example of how this library can be built.
+
+To build the image, execute the following command from your system shell:
+
+```sh
+docker build . -t libhdfs3-build
+```
+
+Note that the image starts from ubuntu 18.04
 
 ### Test
 

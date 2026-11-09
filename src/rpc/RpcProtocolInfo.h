@@ -28,7 +28,7 @@
 #ifndef _HDFS_LIBHDFS3_RPC_RPCPROTOCOLINFO_H_
 #define _HDFS_LIBHDFS3_RPC_RPCPROTOCOLINFO_H_
 
-#include "Hash.h"
+#include "common/Hash.h"
 
 #include <string>
 

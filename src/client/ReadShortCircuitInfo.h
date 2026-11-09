@@ -175,7 +175,7 @@ class ReadShortCircuitInfoBuilder {
   std::string buildDomainSocketAddress(uint32_t port);
   shared_ptr<Socket> getDomainSocketConnection(const std::string& addr);
   shared_ptr<ReadShortCircuitFDHolder> receiveReadShortCircuitFDs(
-      Socket& sock, const ExtendedBlock& block);
+      std::shared_ptr<Socket> socket, const ExtendedBlock& block);
 
  private:
   DatanodeInfo dnInfo;

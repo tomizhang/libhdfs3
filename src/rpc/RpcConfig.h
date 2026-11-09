@@ -28,8 +28,8 @@
 #ifndef _HDFS_LIBHDFS3_RPC_RPCCONFIG_H_
 #define _HDFS_LIBHDFS3_RPC_RPCCONFIG_H_
 
-#include "Hash.h"
-#include "SessionConfig.h"
+#include "common/Hash.h"
+#include "common/SessionConfig.h"
 
 namespace Hdfs {
 namespace Internal {
@@ -37,7 +37,7 @@ namespace Internal {
 class RpcConfig {
 public:
 
-    RpcConfig(const SessionConfig & conf) {
+    RpcConfig(const SessionConfig & conf): sessionConfig(conf) {
         connectTimeout = conf.getRpcConnectTimeout();
         maxIdleTime = conf.getRpcMaxIdleTime();
         maxRetryOnConnect = conf.getRpcMaxRetryOnConnect();
@@ -123,6 +123,10 @@ public:
         this->rpcTimeout = rpcTimeout;
     }
 
+    const SessionConfig & getSessionConfig() const {
+        return sessionConfig;
+    }
+
     bool operator ==(const RpcConfig & other) const {
         return this->maxIdleTime == other.maxIdleTime
                && this->pingTimeout == other.pingTimeout
@@ -136,6 +140,7 @@ public:
     }
 
 private:
+    const SessionConfig & sessionConfig;
     int maxIdleTime;
     int pingTimeout;
     int connectTimeout;

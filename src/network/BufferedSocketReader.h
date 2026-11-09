@@ -1,8 +1,8 @@
 /********************************************************************
- * Copyright (c) 2013 - 2014, Pivotal Inc.
+ * Copyright (c) 2024 - 2025, Visionsky.
  * All rights reserved.
  *
- * Author: Zhanwei Wang
+ * Author: Vincnet
  ********************************************************************/
 /********************************************************************
  * 2014 -
@@ -25,90 +25,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef _HDFS_LIBHDFS3_NETWORK_BUFFEREDSOCKET_H_
-#define _HDFS_LIBHDFS3_NETWORK_BUFFEREDSOCKET_H_
+#ifndef _HDFS_LIBHDFS3_NETWORK_BUFFEREDSOCKETREADER_H_
+#define _HDFS_LIBHDFS3_NETWORK_BUFFEREDSOCKETREADER_H_
+
+#include "common/Memory.h"
+#include "Socket.h"
+#include "SocketReader.h"
 
 #include <vector>
 #include <stdint.h>
 #include <cstdlib>
 
-#include "Socket.h"
-
 namespace Hdfs {
 namespace Internal {
 
-/**
- * A warper of Socket, read big endian int and varint from socket.
- */
-class BufferedSocketReader {
+class BufferedSocketReader: public SocketReader {
 public:
-    virtual ~BufferedSocketReader() {
-    }
+    BufferedSocketReader(std::shared_ptr<Socket> s);
 
-    /**
-     * Read data from socket, if there is data buffered, read from buffer first.
-     * If there is nothing can be read, the caller will be blocked.
-     * @param b The buffer used to receive data.
-     * @param s The size of bytes to be read.
-     * @return The size of data already read.
-     * @throw HdfsNetworkException
-     * @throw HdfsEndOfStream
-     */
-    virtual int32_t read(char * b, int32_t s) = 0;
+    BufferedSocketReader(std::shared_ptr<Socket> s, size_t bufferSize);
 
-    /**
-     * Read data form socket, if there is data buffered, read from buffer first.
-     * If there is not enough data can be read, the caller will be blocked.
-     * @param b The buffer used to receive data.
-     * @param s The size of bytes to read.
-     * @param timeout The timeout interval of this read operation, negative means infinite.
-     * @throw HdfsNetworkException
-     * @throw HdfsEndOfStream
-     * @throw HdfsTimeout
-     */
-    virtual void readFully(char * b, int32_t s, int timeout) = 0;
-
-    /**
-     * Read a 32 bit big endian integer from socket.
-     * If there is not enough data can be read, the caller will be blocked.
-     * @param timeout The timeout interval of this read operation, negative means infinite.
-     * @return A 32 bit integer.
-     * @throw HdfsNetworkException
-     * @throw HdfsEndOfStream
-     * @throw HdfsTimeout
-     */
-    virtual int32_t readBigEndianInt32(int timeout) = 0;
-
-    /**
-     * Read a variable length encoding 32bit integer from socket.
-     * If there is not enough data can be read, the caller will be blocked.
-     * @param timeout The timeout interval of this read operation, negative means infinite.
-     * @return A 32 bit integer.
-     * @throw HdfsNetworkException
-     * @throw HdfsEndOfStream
-     * @throw HdfsTimeout
-     */
-    virtual int32_t readVarint32(int timeout) = 0;
-
-    /**
-     * Test if the socket can be read without blocking.
-     * @param timeout Time timeout interval of this operation, negative means infinite.
-     * @return Return true if the socket can be read without blocking, false on timeout.
-     * @throw HdfsNetworkException
-     * @throw HdfsTimeout
-     */
-    virtual bool poll(int timeout) = 0;
-
-};
-
-/**
- * An implement of BufferedSocketReader.
- */
-class BufferedSocketReaderImpl: public BufferedSocketReader {
-public:
-    BufferedSocketReaderImpl(Socket& s);
-
-    BufferedSocketReaderImpl(Socket& s, size_t bufferSize);
+    ~BufferedSocketReader();
 
     int32_t read(char * b, int32_t s);
 
@@ -124,18 +61,18 @@ private:
     int32_t readVarint32(int timeout, int32_t step);
 
     //for test
-    BufferedSocketReaderImpl(Socket & s, const std::vector<char> & buffer) :
-        cursor(0), size(buffer.size()), sock(s), buffer(buffer) {
+    BufferedSocketReader(std::shared_ptr<Socket> s, const std::vector<char> & buffer) :
+        cursor(0), size(buffer.size()), socket(s), buffer(buffer) {
     }
 
 private:
     int32_t cursor;
     int32_t size;
-    Socket & sock;
+    std::shared_ptr<Socket> socket;
     std::vector<char> buffer;
 };
 
 }
 }
 
-#endif /* _HDFS_LIBHDFS3_NETWORK_BUFFEREDSOCKET_H_ */
+#endif /* _HDFS_LIBHDFS3_NETWORK_BUFFEREDSOCKETREADER_H_ */

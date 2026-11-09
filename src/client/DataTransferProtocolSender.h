@@ -28,8 +28,11 @@
 #ifndef _HDFS_LIBHDFS_3_CLIENT_DATATRANSFERPROTOCOLSENDER_H_
 #define _HDFS_LIBHDFS_3_CLIENT_DATATRANSFERPROTOCOLSENDER_H_
 
+#include "common/Memory.h"
 #include "DataTransferProtocol.h"
 #include "network/Socket.h"
+
+
 
 /**
  * Version 28:
@@ -57,10 +60,11 @@ enum DataTransferOp {
  */
 class DataTransferProtocolSender: public DataTransferProtocol {
 public:
-    DataTransferProtocolSender(Socket & sock, int writeTimeout,
+    DataTransferProtocolSender(std::shared_ptr<Socket> socket, 
+                               int writeTimeout,
                                const std::string & datanodeAddr);
 
-    virtual ~DataTransferProtocolSender();
+    ~DataTransferProtocolSender() override;
 
     /**
      * Read a block.
@@ -132,7 +136,7 @@ public:
                                         uint32_t maxVersion);
 
 private:
-    Socket & sock;
+    std::shared_ptr<Socket> socket;
     int writeTimeout;
     std::string datanode;
 };

@@ -38,7 +38,7 @@ namespace Internal {
 
 class FileSystemKey {
 public:
-    FileSystemKey(const std::string & uri, const char * user);
+    FileSystemKey(const std::string & uri, const std::string & user);
 
     FileSystemKey(const std::string & auth, const std::string & host,
                   const std::string & port, const std::string & scheme,

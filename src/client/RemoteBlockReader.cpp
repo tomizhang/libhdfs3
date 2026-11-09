@@ -25,36 +25,91 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "BigEndian.h"
-#include "Crc32.h"
-#include "DataTransferProtocolSender.h"
-#include "Exception.h"
-#include "ExceptionInternal.h"
-#include "HWCrc32c.h"
 #include "RemoteBlockReader.h"
-#include "SWCrc32c.h"
-#include "IntelAsmCrc32c.h"
-#include "WriteBuffer.h"
+
+#include "common/Memory.h"
+#include "common/BigEndian.h"
+#include "common/Logger.h"
+#include "common/DebugUtil.h"
+#include "common/HWCrc32c.h"
+#include "common/SWCrc32c.h"
+#include "common/WriteBuffer.h"
+#include "common/Exception.h"
+#include "common/ExceptionInternal.h"
+#include "DataTransferProtocolSender.h"
+#include "DataTransferSaslClient.h"
+#include "KerberosName.h"
+#include "UserInfo.h"
+#include "rpc/RpcContentWrapper.h"
+#include "rpc/RpcRemoteCall.h"
+#include "server/RpcHelper.h"
+#include "network/Socket.h"
+#include "IpcConnectionContext.pb.h"
+
+#include <algorithm>
+#include <cctype>
 
 #include <inttypes.h>
-#include <memory>
 #include <vector>
+#include <krb5/krb5.h>
+#include <iostream>
+#include <sstream>
+#include <iomanip>
+#include <gsasl.h>
+
+#define RPC_HEADER_MAGIC "hrpc"
+#define RPC_HEADER_VERSION 9
+#define INVALID_RETRY_COUNT -1
+#define CONNECTION_CONTEXT_CALL_ID -3
+
+#define DATANODE_VERSION 1
+#define DATANODE_PROTOCOL "org.apache.hadoop.hdfs.protocol.DataTransferProtos"
+#define BLOCK_TOKEN_KIND "HDFS_BLOCK_TOKEN"
+
+using namespace ::google::protobuf;
+using namespace google::protobuf::io;
 
 namespace Hdfs {
 namespace Internal {
 
-/*
- * The maximum size of the data and checksums in a packet, the same limit as
- * PacketReceiver.MAX_PACKET_SIZE in Hadoop. Datanodes send much smaller packets.
- */
-static const int64_t MAX_PACKET_SIZE = 16 * 1024 * 1024;
+static exception_ptr HandlerRpcResponseException(exception_ptr e) {
+    LOG(DEBUG1, "RemoteBlockReader::HandlerRpcResponseException");
+    exception_ptr retval = e;
+
+    try {
+        rethrow_exception(e);
+    } catch (const HdfsRpcServerException & e) {
+        UnWrapper < NameNodeStandbyException, RpcNoSuchMethodException, UnsupportedOperationException,
+                  AccessControlException, SafeModeException, SaslException > unwrapper(e);
+
+        try {
+            unwrapper.unwrap(__FILE__, __LINE__);
+        } catch (const NameNodeStandbyException & e) {
+            retval = current_exception();
+        } catch (const UnsupportedOperationException & e) {
+            retval = current_exception();
+        } catch (const AccessControlException & e) {
+            retval = current_exception();
+        } catch (const SafeModeException & e) {
+            retval = current_exception();
+        } catch (const SaslException & e) {
+            retval = current_exception();
+        } catch (const RpcNoSuchMethodException & e) {
+            retval = current_exception();
+        } catch (const HdfsIOException & e) {
+        }
+    }
+
+    return retval;
+}
 
 RemoteBlockReader::RemoteBlockReader(const ExtendedBlock& eb,
-                                     DatanodeInfo datanode,
-                                     PeerCache& peerCache, int64_t start,
-                                     int64_t len, const Token& token,
+                                     DatanodeInfo& datanode,
+                                     PeerCache& peerCache, int64_t start, int64_t len, 
+                                     const DataEncryptionKey& k,
+                                     const Token& t,
                                      const char* clientName, bool verify,
-                                     SessionConfig& conf)
+                                     const SessionConfig& c)
     : sentStatus(false),
       verify(verify),
       binfo(eb),
@@ -66,37 +121,49 @@ RemoteBlockReader::RemoteBlockReader(const ExtendedBlock& eb,
       cursor(start),
       endOffset(len + start),
       lastSeqNo(-1),
-      peerCache(peerCache) {
+      peerCache(peerCache), 
+      rpcProtocolInfo(1,"org.apache.hadoop.hdfs.protocol.DataTransferProtocol", "HDFS_BLOCK_TOKEN"),
+      dataEncryptionKey(k), token(t), conf(c) {
 
     assert(start >= 0);
     readTimeout = conf.getInputReadTimeout();
     writeTimeout = conf.getInputWriteTimeout();
     connTimeout = conf.getInputConnTimeout();
-    bool connectToDnViaHostname = conf.connectViaHostname();
+    tcpNoDelay = conf.isRpcTcpNoDelay();
+    maxRetryOnConnect = conf.getRpcMaxRetryOnConnect();
+    authMethod = RpcAuth::ParseMethod(conf.getRpcAuthMethod());
 
+    LOG(DEBUG1, "RemoteBlockReader->DataEncryptionKey->KeyId: %u", this->dataEncryptionKey.getKeyId());
+    LOG(DEBUG1, "RemoteBlockReader->DataEncryptionKey->BlockPoolId: %s", this->dataEncryptionKey.getBlockPoolId().c_str());
+    LOG(DEBUG1, "RemoteBlockReader->DataEncryptionKey->Nonce: %s", stringToHex(this->dataEncryptionKey.getNonce()).c_str());
+    LOG(DEBUG1, "RemoteBlockReader->DataEncryptionKey->EncryptionKey: [%s]", stringToHex(this->dataEncryptionKey.getEncryptionKey()).c_str());
+    LOG(DEBUG1, "RemoteBlockReader->DataEncryptionKey->ExpiryDate: %llu", this->dataEncryptionKey.getExpiryDate());
+    LOG(DEBUG1, "RemoteBlockReader->DataEncryptionKey->EncryptionAlgorithm: %s", this->dataEncryptionKey.getEncryptionAlgorithm().c_str());
+
+    RpcAuth rpcAuth(user, authMethod);
     bool fromCache = false;
-    sock = peerCache.getConnection(datanode);
-    if (sock) {
+    socket = peerCache.getConnection(datanode);
+    if (socket) {
         fromCache = true;
     } else {
-        sock = createNewPeer(datanode, connectToDnViaHostname);
+        socket = createNewPeer(datanode, rpcAuth);
     }
 
     try {
-        in = shared_ptr<BufferedSocketReader>(new BufferedSocketReaderImpl(*sock));
+        in = std::make_shared<BufferedSocketReader>(socket);
         sender = shared_ptr<DataTransferProtocol>(new DataTransferProtocolSender(
-            *sock, writeTimeout, datanode.formatAddress()));
+            socket, writeTimeout, datanode.formatAddress()));
         sender->readBlock(eb, token, clientName, start, len);
         checkResponse();
     } catch (const HdfsException &) {
         if (fromCache) {
             LOG(DEBUG1, "Cached connection to datanode %s failed or closed, retrying with fresh connection.",
                 datanode.formatAddress().c_str());
-            sock->close();
-            sock = createNewPeer(datanode, connectToDnViaHostname);
-            in = shared_ptr<BufferedSocketReader>(new BufferedSocketReaderImpl(*sock));
+            socket->close();
+            socket = createNewPeer(datanode, rpcAuth);
+            in = std::make_shared<BufferedSocketReader>(socket);
             sender = shared_ptr<DataTransferProtocol>(new DataTransferProtocolSender(
-                *sock, writeTimeout, datanode.formatAddress()));
+                socket, writeTimeout, datanode.formatAddress()));
             sender->readBlock(eb, token, clientName, start, len);
             checkResponse();
         } else {
@@ -107,32 +174,122 @@ RemoteBlockReader::RemoteBlockReader(const ExtendedBlock& eb,
 
 RemoteBlockReader::~RemoteBlockReader() {
     if (sentStatus) {
-        peerCache.addConnection(sock, datanode);
+        peerCache.addConnection(socket, datanode);
     } else {
-        sock->close();
+        socket->close();
     }
 }
 
-shared_ptr<Socket> RemoteBlockReader::createNewPeer(const DatanodeInfo& dn, const bool connectToDnViaHostname) {
-    shared_ptr<Socket> s;
-    try {
-        s = shared_ptr<Socket>(new TcpSocketImpl);
-
-        std::string host;
-        if (connectToDnViaHostname) {
-            host = dn.getHostName();
-        } else {
-            host = dn.getIpAddr();
+shared_ptr<Socket> RemoteBlockReader::createNewPeer(const DatanodeInfo& dn, const RpcAuth & auth) {
+    int sleep = 1;
+    exception_ptr lastError = nullptr;
+    for (int i = 0; i < maxRetryOnConnect; ++i) {
+        std::shared_ptr<Socket> socket = std::make_shared<TcpSocketImpl>();
+        try {
+            if (auth.getProtocol() == AuthProtocol::SASL) {
+                currentDnAddress = dn.formatAddress();
+                //LOG(DEBUG1, "RemoteBlockReader::getNextPeer->Address: %s, ", currentDnAddress.c_str());
+                std::string port = std::to_string(dn.getXferPort());
+                //LOG(DEBUG1, "RemoteBlockReader::getNextPeer->IP: %s, Port %s ", dn.getIpAddr().c_str(), port.c_str());
+                socket->connect(dn.getIpAddr().c_str(), port.c_str(), connTimeout);
+                socket->setNoDelay(tcpNoDelay);
+                DataTransferSaslClient saslClient(socket, conf, dataEncryptionKey, token);
+                return saslClient.doHandshake();
+            } else {
+                socket->connect(dn.getIpAddr().c_str(), dn.getXferPort(), connTimeout);
+                socket->setNoDelay(true);
+                return socket;
+            }
+        } catch (const SaslException & e) {
+            // Datanode may treat this connect as replay, retry later
+            sleep = (rand() % 5) + 1;
+            lastError = current_exception();
+            LOG(LOG_ERROR,
+                "Failed to setup DataTransfer connection to \"%s\" caused by:\n%s",
+                dn.formatAddress().c_str(), GetExceptionDetail(e));
+        } catch (const HdfsNetworkException & e) {
+            sleep = 1;
+            lastError = current_exception();
+            LOG(LOG_ERROR,
+                "Failed to setup DataTransfer connection to \"%s\" caused by:\n%s",
+                dn.formatAddress().c_str(), GetExceptionDetail(e));
+        } catch (const HdfsTimeoutException & e) {
+            sleep = 1;
+            lastError = current_exception();
+            LOG(LOG_ERROR,
+                "Failed to setup DataTransfer connection to \"%s\" caused by:\n%s",
+                dn.formatAddress().c_str(), GetExceptionDetail(e));
         }
-        s->connect(host.c_str(), dn.getXferPort(), connTimeout);
-        s->setNoDelay(true);
-    } catch (const HdfsTimeoutException & e) {
-        NESTED_THROW(HdfsIOException,
-                     "RemoteBlockReader: Failed to connect to %s",
-                     dn.formatAddress().c_str());
+        if (i + 1 < maxRetryOnConnect) {
+            LOG(DEBUG1,
+                "Retrying connect to server: \"%s\". Already tried %d time(s)",
+                dn.formatAddress().c_str(), i + 1);
+        }
+        socket->close();
+        CheckOperationCanceled();
+        sleep_for(seconds(sleep));
     }
+    if (!lastError) {
+        try {
+            NESTED_THROW(HdfsNetworkException,
+                        "Failed to connect to datanode: \"%s:%d\"",
+                        dn.getIpAddr().c_str(), dn.getXferPort());
+        } catch (const HdfsNetworkException & e) {
+            lastError = current_exception();
+        }
+    }
+    rethrow_exception(lastError);
+}
 
-    return s;
+void RemoteBlockReader::sendConnectionHeader(const RpcAuth &auth) {
+    //LOG(DEBUG1, "RemoteBlockReader::sendConnectionHeader Begin");
+    WriteBuffer buffer;
+    buffer.write(RPC_HEADER_MAGIC, strlen(RPC_HEADER_MAGIC));
+    buffer.write(static_cast<char>(RPC_HEADER_VERSION));
+    buffer.write(static_cast<char>(0));  //for future feature
+    buffer.write(static_cast<char>(auth.getProtocol()));
+    //LOG(DEBUG1, "RemoteBlockReader::sendConnectionHeader Socket writeFully...");
+    socket->writeFully(buffer.getBuffer(0), buffer.getDataSize(0), writeTimeout);
+    //LOG(DEBUG1, "RemoteBlockReader::sendConnectionHeader End");
+}
+
+void RemoteBlockReader::buildConnectionContext(
+    IpcConnectionContextProto & connectionContext, const RpcAuth & auth) {
+    //LOG(DEBUG1, "RemoteBlockReader::buildConnectionContext");
+    connectionContext.set_protocol(rpcProtocolInfo.getProtocol());
+    std::string euser = this->user.getEffectiveUser();
+    std::string ruser = this->user.getRealUser();
+
+    if (auth.getMethod() != AuthMethod::TOKEN) {
+        UserInformationProto * user = connectionContext.mutable_userinfo();
+        user->set_effectiveuser(principal);
+
+        if (auth.getMethod() != AuthMethod::SIMPLE) {
+            if (!ruser.empty() && ruser != euser) {
+                user->set_realuser(ruser);
+            }
+        }
+    }
+}
+
+void RemoteBlockReader::sendConnectionContent(const RpcAuth & auth) {
+    //LOG(DEBUG1, "RemoteBlockReader::sendConnectionContent Begin");
+    WriteBuffer buffer;
+    IpcConnectionContextProto connectionContext;
+    RpcRequestHeaderProto rpcHeader;
+    buildConnectionContext(connectionContext, auth);
+    rpcHeader.set_callid(CONNECTION_CONTEXT_CALL_ID);
+    rpcHeader.set_clientid(clientId);
+    rpcHeader.set_retrycount(INVALID_RETRY_COUNT);
+    rpcHeader.set_rpckind(RPC_PROTOCOL_BUFFER);
+    rpcHeader.set_rpcop(RpcRequestHeaderProto_OperationProto_RPC_FINAL_PACKET);
+    RpcContentWrapper wrapper(&rpcHeader, &connectionContext);
+    int size = wrapper.getLength();
+    buffer.writeBigEndian(size);
+    wrapper.writeTo(buffer);
+    socket->writeFully(buffer.getBuffer(0), buffer.getDataSize(0), writeTimeout);
+    lastActivity = lastIdle = steady_clock::now();
+    //LOG(DEBUG1, "RemoteBlockReader::sendConnectionContent End");
 }
 
 void RemoteBlockReader::checkResponse() {
@@ -145,10 +302,10 @@ void RemoteBlockReader::checkResponse() {
     }
 
     respBuffer.resize(respSize);
-    in->readFully(respBuffer.data(), respSize, readTimeout);
+    in->readFully(&respBuffer[0], respSize, readTimeout);
     BlockOpResponseProto resp;
 
-    if (!resp.ParseFromArray(respBuffer.data(), respBuffer.size())) {
+    if (!resp.ParseFromArray(&respBuffer[0], respBuffer.size())) {
         THROW(HdfsIOException, "RemoteBlockReader cannot parse BlockOpResponseProto from Datanode response, "
               "Block: %s, from Datanode: %s", binfo.toString().c_str(), datanode.formatAddress().c_str());
     }
@@ -175,9 +332,9 @@ void RemoteBlockReader::checkResponse() {
     const ChecksumProto & cs = checksumInfo.checksum();
     chunkSize = cs.bytesperchecksum();
 
-    if (chunkSize <= 0) {
+    if (chunkSize < 0) {
         THROW(HdfsIOException,
-              "RemoteBlockReader invalid chunk size: %d, expected range(0, %" PRId64 "], Block: %s, from Datanode: %s",
+              "RemoteBlockReader invalid chunk size: %d, expected range[0, %" PRId64 "], Block: %s, from Datanode: %s",
               chunkSize, binfo.getNumBytes(), binfo.toString().c_str(), datanode.formatAddress().c_str());
     }
 
@@ -188,23 +345,16 @@ void RemoteBlockReader::checkResponse() {
         break;
 
     case ChecksumTypeProto::CHECKSUM_CRC32:
-        checksum = std::make_shared<Crc32>();
-        checksumSize = sizeof(int32_t);
+        THROW(HdfsIOException, "RemoteBlockReader does not support CRC32 checksum, Block: %s, from Datanode: %s",
+              binfo.toString().c_str(), datanode.formatAddress().c_str());
         break;
 
     case ChecksumTypeProto::CHECKSUM_CRC32C:
-#if defined(__SSE4_2__) && defined(__LP64__) &&!defined(__APPLE__)
-        checksum = std::make_shared<IntelAsmCrc32c>();
-#else
-#if !(((defined(__PPC64__) || defined(__powerpc64__)) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)) || (defined(__s390x__)))
         if (HWCrc32c::available()) {
             checksum = shared_ptr<Checksum>(new HWCrc32c());
-        } else
-#endif
-        {
+        } else {
             checksum = shared_ptr<Checksum>(new SWCrc32c());
         }
-#endif
 
         checksumSize = sizeof(int32_t);
         break;
@@ -239,13 +389,10 @@ shared_ptr<PacketHeader> RemoteBlockReader::readPacketHeader() {
                   datanode.formatAddress().c_str(), binfo.toString().c_str());
         }
 
-        in->readFully(buf.data(), packetHeaderLen, readTimeout);
+        in->readFully(&buf[0], packetHeaderLen, readTimeout);
         retval = shared_ptr<PacketHeader>(new PacketHeader);
-        retval->readFields(buf.data(), packetHeaderLen);
+        retval->readFields(&buf[0], packetHeaderLen);
         return retval;
-    } catch (const HdfsTimeoutException & e) {
-        NESTED_THROW(HdfsIOException, "RemoteBlockReader: failed to read block header for Block: %s from Datanode: %s.",
-                     binfo.toString().c_str(), datanode.formatAddress().c_str());
     } catch (const HdfsIOException & e) {
         NESTED_THROW(HdfsIOException, "RemoteBlockReader: failed to read block header for Block: %s from Datanode: %s.",
                      binfo.toString().c_str(), datanode.formatAddress().c_str());
@@ -253,7 +400,11 @@ shared_ptr<PacketHeader> RemoteBlockReader::readPacketHeader() {
 }
 
 void RemoteBlockReader::readNextPacket() {
-    assert(position >= size);
+    if (position < size) {
+        THROW(HdfsIOException,
+              "RemoteBlockReader: readNextPacket called with unread buffer state for Block: %s from Datanode: %s.",
+              binfo.toString().c_str(), datanode.formatAddress().c_str());
+    }
     lastHeader = readPacketHeader();
     int dataSize = lastHeader->getDataLen();
     int64_t pendingAhead = 0;
@@ -263,61 +414,40 @@ void RemoteBlockReader::readNextPacket() {
               binfo.toString().c_str(), datanode.formatAddress().c_str());
     }
 
-    if (dataSize < 0 || (dataSize == 0 && lastHeader->getPacketLen() != static_cast<int>(sizeof(int32_t)))) {
-        THROW(HdfsIOException, "RemoteBlockReader: Invalid Packet, packetLen is %d, dataSize is %d, Block: %s, from Datanode: %s",
-              lastHeader->getPacketLen(), dataSize, binfo.toString().c_str(), datanode.formatAddress().c_str());
+    if (dataSize <= 0 && lastHeader->getPacketLen() != static_cast<int>(sizeof(int32_t))) {
+        THROW(HdfsIOException,
+              "RemoteBlockReader: invalid empty packet for Block: %s from Datanode: %s.",
+              binfo.toString().c_str(), datanode.formatAddress().c_str());
     }
 
     if (dataSize > 0) {
-        /*
-         * chunkSize is validated to be positive in checkResponse.
-         * Use 64-bit arithmetic: the values come from the Datanode and must not overflow.
-         */
-        int64_t chunks = (static_cast<int64_t>(dataSize) + chunkSize - 1) / chunkSize;
-        int64_t checksumLen = chunks * checksumSize;
-        int64_t packetSize = checksumLen + dataSize;
-
-        if (packetSize > MAX_PACKET_SIZE
-                || static_cast<int64_t>(lastHeader->getPacketLen()) != static_cast<int64_t>(sizeof(int32_t)) + packetSize) {
-            THROW(HdfsIOException, "RemoteBlockReader: Invalid Packet, packetLen is %d, dataSize is %d, checksum size is %" PRId64
-                  ", Block: %s, from Datanode: %s",
-                  lastHeader->getPacketLen(), dataSize, checksumLen, binfo.toString().c_str(), datanode.formatAddress().c_str());
-        }
-
-        /*
-         * the first packet we get may start at the position before we required,
-         * but a packet must never start after the position we required
-         * and must contain at least one byte at or after it.
-         */
-        int64_t offsetInBlock = lastHeader->getOffsetInBlock();
-
-        if (offsetInBlock < 0 || offsetInBlock > cursor || cursor - offsetInBlock >= dataSize) {
-            THROW(HdfsIOException, "RemoteBlockReader: Invalid Packet, offset in block is %" PRId64 ", dataSize is %d, "
-                  "expected offset range (%" PRId64 ", %" PRId64 "], Block: %s, from Datanode: %s",
-                  offsetInBlock, dataSize, cursor - dataSize, cursor, binfo.toString().c_str(), datanode.formatAddress().c_str());
-        }
-
-        /*
-         * Reset the state before reading, so that it stays consistent if reading fails.
-         */
-        position = 0;
-        size = 0;
-        buffer.resize(packetSize);
-        in->readFully(buffer.data(), packetSize, readTimeout);
+        int chunks = (dataSize + chunkSize - 1) / chunkSize;
+        int checksumLen = chunks * checksumSize;
+        size = checksumLen + dataSize;
+        assert(size == lastHeader->getPacketLen() - static_cast<int>(sizeof(int32_t)));
+        buffer.resize(size);
+        in->readFully(&buffer[0], size, readTimeout);
         lastSeqNo = lastHeader->getSeqno();
 
-        if (verify) {
-            verifyChecksum(static_cast<int>(chunks));
+        if (lastHeader->getPacketLen() != static_cast<int>(sizeof(int32_t)) + dataSize + checksumLen) {
+            THROW(HdfsIOException, "Invalid Packet, packetLen is %d, dataSize is %d, checksum size is %d",
+                  lastHeader->getPacketLen(), dataSize, checksumLen);
         }
 
-        size = static_cast<int>(packetSize);
+        if (verify) {
+            verifyChecksum(chunks);
+        }
 
         /*
          * skip checksum
          */
-        position = static_cast<int>(checksumLen);
-        pendingAhead = cursor - offsetInBlock;
-        position += static_cast<int>(pendingAhead);
+        position = checksumLen;
+        /*
+         * the first packet we get may start at the position before we required
+         */
+        pendingAhead = cursor - lastHeader->getOffsetInBlock();
+        pendingAhead = pendingAhead > 0 ? pendingAhead : 0;
+        position += pendingAhead;
     }
 
     /*
@@ -357,14 +487,14 @@ void RemoteBlockReader::sendStatus() {
     int size = status.ByteSize();
     buffer.writeVarint32(size);
     status.SerializeToArray(buffer.alloc(size), size);
-    sock->writeFully(buffer.getBuffer(0), buffer.getDataSize(0), writeTimeout);
+    socket->writeFully(buffer.getBuffer(0), buffer.getDataSize(0), writeTimeout);
     sentStatus = true;
 }
 
 void RemoteBlockReader::verifyChecksum(int chunks) {
     int dataSize = lastHeader->getDataLen();
-    char * pchecksum = buffer.data();
-    char * pdata = buffer.data() + (chunks * checksumSize);
+    char * pchecksum = &buffer[0];
+    char * pdata = &buffer[0] + (chunks * checksumSize);
 
     for (int i = 0; i < chunks; ++i) {
         int size = chunkSize < dataSize ? chunkSize : dataSize;
@@ -400,13 +530,8 @@ int32_t RemoteBlockReader::read(char * buf, int32_t len) {
             readNextPacket();
         }
 
-        if (position < 0 || position > size) {
-            THROW(HdfsIOException, "RemoteBlockReader: invalid position %d in packet of size %d, Block: %s, from Datanode: %s",
-                  position, size, binfo.toString().c_str(), datanode.formatAddress().c_str());
-        }
-
         int32_t todo = len < size - position ? len : size - position;
-        memcpy(buf, buffer.data() + position, todo);
+        memcpy(buf, &buffer[position], todo);
         position += todo;
         cursor += todo;
         return todo;
@@ -432,11 +557,6 @@ void RemoteBlockReader::skip(int64_t len) {
 
             if (position >= size) {
                 readNextPacket();
-            }
-
-            if (position < 0 || position > size) {
-                THROW(HdfsIOException, "RemoteBlockReader: invalid position %d in packet of size %d, Block: %s, from Datanode: %s",
-                      position, size, binfo.toString().c_str(), datanode.formatAddress().c_str());
             }
 
             int batch = size - position;

@@ -25,19 +25,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "Exception.h"
-#include "ExceptionInternal.h"
-#include "IpcConnectionContext.pb.h"
-#include "Logger.h"
-#include "RpcChannel.h"
-#include "RpcClient.h"
-#include "RpcContentWrapper.h"
-#include "RpcHeader.pb.h"
-#include "RpcHeader.pb.h"
-#include "server/RpcHelper.h"
-#include "Thread.h"
-#include "WriteBuffer.h"
 
+#include "RpcChannel.h"
+#include "common/Memory.h"
+#include "common/Thread.h"
+#include "common/Logger.h"
+#include "common/WriteBuffer.h"
+#include "common/Exception.h"
+#include "common/ExceptionInternal.h"
+#include "network/TcpSocket.h"
+#include "RpcClient.h"
+#include "RpcSaslClient.h"
+#include "RpcContentWrapper.h"
+#include "server/RpcHelper.h"
+#include "RpcHeader.pb.h"
+#include "IpcConnectionContext.pb.h"
+
+#include <chrono>
 #include <google/protobuf/io/coded_stream.h>
 
 #define RPC_HEADER_MAGIC "hrpc"
@@ -51,20 +55,22 @@ using namespace google::protobuf::io;
 namespace Hdfs {
 namespace Internal {
 
+static std::mutex firstSaslExceptionMutex;
+
 RpcChannelImpl::RpcChannelImpl(const RpcChannelKey & k, RpcClient & c) :
-    refs(0), available(false), key(k), client(c), lastActivity(steady_clock::now()), lastIdle(lastActivity.load(std::memory_order_relaxed)) {
-    sock = shared_ptr<Socket>(new TcpSocketImpl);
-    sock->setLingerTimeout(k.getConf().getLingerTimeout());
-    in = shared_ptr<BufferedSocketReader>(
-             new BufferedSocketReaderImpl(
-                 *static_cast<TcpSocketImpl *>(sock.get())));
+    refs(0), available(false), key(k), client(c) {
+    socket = std::make_shared<TcpSocketImpl>();
+    socket->setLingerTimeout(k.getConf().getLingerTimeout());
+    in = std::make_shared<BufferedSocketReader>(socket);
+    lastActivity = lastIdle = steady_clock::now();
 }
 
-RpcChannelImpl::RpcChannelImpl(const RpcChannelKey & k, Socket * s,
-                               BufferedSocketReader * in, RpcClient & c) :
-    refs(0), available(false), key(k), client(c), lastActivity(steady_clock::now()), lastIdle(lastActivity.load(std::memory_order_relaxed)) {
-    sock = shared_ptr<Socket>(s);
-    this->in = shared_ptr<BufferedSocketReader>(in);
+RpcChannelImpl::RpcChannelImpl(const RpcChannelKey & k, 
+                               std::shared_ptr<Socket> s,
+                               std::shared_ptr<BufferedSocketReader> r,
+                               RpcClient & c) :
+    refs(0), available(false), key(k), client(c), socket(s), in(r) {
+    lastActivity = lastIdle = steady_clock::now();
 }
 
 RpcChannelImpl::~RpcChannelImpl() {
@@ -72,7 +78,7 @@ RpcChannelImpl::~RpcChannelImpl() {
     assert(refs == 0);
 
     if (available) {
-        sock->close();
+        socket->close();
     }
 }
 
@@ -84,250 +90,131 @@ void RpcChannelImpl::close(bool immediate) {
     if (immediate && !refs) {
         assert(pendingCalls.empty());
         available = false;
-        sock->close();
+        socket->close();
     }
-}
-
-void RpcChannelImpl::sendSaslMessage(RpcSaslProto * msg, Message * resp) {
-    int totalLen;
-    WriteBuffer buffer;
-    RpcRequestHeaderProto rpcHeader;
-    rpcHeader.set_callid(AuthProtocol::SASL);
-    rpcHeader.set_clientid(client.getClientId());
-    rpcHeader.set_retrycount(INVALID_RETRY_COUNT);
-    rpcHeader.set_rpckind(RPC_PROTOCOL_BUFFER);
-    rpcHeader.set_rpcop(RpcRequestHeaderProto_OperationProto_RPC_FINAL_PACKET);
-    RpcContentWrapper wrapper(&rpcHeader, msg);
-    totalLen = wrapper.getLength();
-    buffer.writeBigEndian(totalLen);
-    wrapper.writeTo(buffer);
-    sock->writeFully(buffer.getBuffer(0), buffer.getDataSize(0), key.getConf().getWriteTimeout());
-    RpcRemoteCallPtr call(
-        new RpcRemoteCall(RpcCall(false, "sasl message", NULL, resp),
-                          AuthProtocol::SASL, client.getClientId()));
-    pendingCalls[AuthProtocol::SASL] = call;
-}
-
-
-const RpcSaslProto_SaslAuth * RpcChannelImpl::createSaslClient(
-    const RepeatedPtrField<RpcSaslProto_SaslAuth> * auths) {
-    const RpcSaslProto_SaslAuth * auth = NULL;
-    Token token;
-
-    for (int i = 0; i < auths->size(); ++i) {
-        auth = &auths->Get(i);
-        RpcAuth method(RpcAuth::ParseMethod(auth->method()));
-
-        if (method.getMethod() == AuthMethod::TOKEN && key.hasToken()) {
-            token = key.getToken();
-            break;
-        } else if (method.getMethod() == AuthMethod::KERBEROS) {
-            break;
-        } else if (method.getMethod() == AuthMethod::SIMPLE) {
-            return auth;
-        } else if (method.getMethod() == AuthMethod::UNKNOWN) {
-            return auth;
-        } else {
-            auth = NULL;
-        }
-    }
-
-    if (!auth) {
-        std::stringstream ss;
-        ss.imbue(std::locale::classic());
-        ss << "Client cannot authenticate via: ";
-
-        for (int i = 0; i < auths->size(); ++i) {
-            auth = &auths->Get(i);
-            ss << auth->mechanism() << ", ";
-        }
-
-        THROW(AccessControlException, "%s", ss.str().c_str());
-    }
-
-    saslClient = shared_ptr<SaslClient>(
-                     new SaslClient(*auth, token, key.getAuth().getUser().getPrincipal()));
-    return auth;
-}
-
-std::string RpcChannelImpl::saslEvaluateToken(RpcSaslProto & response, bool serverIsDone) {
-    std::string token;
-
-    if (response.has_token()) {
-        token = saslClient->evaluateChallenge(response.token());
-    } else if (!serverIsDone) {
-        THROW(AccessControlException, "Server challenge contains no token");
-    }
-
-    if (serverIsDone) {
-        if (!saslClient->isComplete()) {
-            THROW(AccessControlException, "Client is out of sync with server");
-        }
-
-        if (!token.empty()) {
-            THROW(AccessControlException, "Client generated spurious response");
-        }
-    }
-
-    return token;
-}
-
-RpcAuth RpcChannelImpl::setupSaslConnection() {
-    RpcAuth retval;
-    RpcSaslProto negotiateRequest, response, msg;
-    negotiateRequest.set_state(RpcSaslProto_SaslState_NEGOTIATE);
-    sendSaslMessage(&negotiateRequest, &response);
-    bool done = false;
-
-    do {
-        readOneResponse(false);
-        msg.Clear();
-
-        switch (response.state()) {
-        case RpcSaslProto_SaslState_NEGOTIATE: {
-            const RpcSaslProto_SaslAuth * auth = createSaslClient(
-                    &response.auths());
-            retval = RpcAuth(RpcAuth::ParseMethod(auth->method()));
-
-            if (retval.getMethod() == AuthMethod::SIMPLE) {
-                done = true;
-            } else if (retval.getMethod() == AuthMethod::UNKNOWN) {
-                THROW(AccessControlException, "Unknown auth mechanism");
-            } else {
-                std::string respToken;
-                RpcSaslProto_SaslAuth * respAuth = msg.add_auths();
-                respAuth->CopyFrom(*auth);
-                std::string chanllege;
-
-                if (auth->has_challenge()) {
-                    chanllege = auth->challenge();
-                    respAuth->clear_challenge();
-                }
-
-                respToken = saslClient->evaluateChallenge(chanllege);
-
-                if (!respToken.empty()) {
-                    msg.set_token(respToken);
-                }
-
-                msg.set_state(RpcSaslProto_SaslState_INITIATE);
-            }
-
-            break;
-        }
-
-        case RpcSaslProto_SaslState_CHALLENGE: {
-            if (!saslClient) {
-                THROW(AccessControlException, "Server sent unsolicited challenge");
-            }
-
-            std::string token = saslEvaluateToken(response, false);
-            msg.set_token(token);
-            msg.set_state(RpcSaslProto_SaslState_RESPONSE);
-            break;
-        }
-
-        case RpcSaslProto_SaslState_SUCCESS:
-            if (!saslClient) {
-                retval = RpcAuth(AuthMethod::SIMPLE);
-            } else {
-                saslEvaluateToken(response, true);
-            }
-
-            done = true;
-            break;
-
-        default:
-            break;
-        }
-
-        if (!done) {
-            response.Clear();
-            sendSaslMessage(&msg, &response);
-        }
-    } while (!done);
-
-    return retval;
 }
 
 void RpcChannelImpl::connect() {
+    LOG(DEBUG1, "RpcChannelImpl::connect Begin");
     int sleep = 1;
-    exception_ptr lastError;
-    const RpcConfig & conf = key.getConf();
+    exception_ptr lastError = nullptr;
+    const RpcConfig & rpcConfig = key.getConf();
     const RpcServerInfo & server = key.getServer();
-    std::string buffer;
-
-    for (int i = 0; i < conf.getMaxRetryOnConnect(); ++i) {
-        RpcAuth auth = key.getAuth();
-
-        if (key.hasToken()) {
-            auth.setMethod(AuthMethod::TOKEN);
-        }
-
+    RpcAuth rpcAuth = key.getAuth();
+    bool firstSaslException = true;
+    for (int i = 0; i < rpcConfig.getMaxRetryOnConnect(); ++i) {
         try {
-            while (true) {
-                sock->connect(server.getHost().c_str(), server.getPort().c_str(),
-                              conf.getConnectTimeout());
-                sock->setNoDelay(conf.isTcpNoDelay());
-                sendConnectionHeader(auth);
-
-                if (auth.getProtocol() == AuthProtocol::SASL) {
-                    auth = setupSaslConnection();
-
-                    if (auth.getProtocol() == AuthProtocol::SASL) {
-                        //success
-                        break;
-                    }
-
-                    /*
-                     * switch to other auth protocol
-                     */
-                    sock->close();
-                    CheckOperationCanceled();
-                } else {
-                    break;
-                }
+            LOG(DEBUG1, "RpcChannelImpl::connect->IP: %s, Port %s ", server.getHost().c_str(), server.getPort().c_str());
+            socket->connect(server.getHost().c_str(), server.getPort().c_str(), rpcConfig.getConnectTimeout());
+            socket->setNoDelay(rpcConfig.isTcpNoDelay());
+            if (rpcAuth.getProtocol() == AuthProtocol::SASL) {
+                RpcSaslClient rpcSaslClient(socket, key, client, rpcConfig.getSessionConfig());
+                socket = rpcSaslClient.doHandshake();
+                rpcAuth = rpcSaslClient.getAuth();
+            } else {
+                sendConnectionHeader(rpcAuth);
             }
-
-            auth.setUser(key.getAuth().getUser());
-            sendConnectionContent(auth);
+            rpcAuth.setUser(key.getAuth().getUser());
+            LOG(DEBUG1, "RpcChannelImpl::connect->sendConnectionContent");
+            sendConnectionContent(rpcAuth);
+            
             available = true;
             lastActivity = lastIdle = steady_clock::now();
+            LOG(DEBUG1, "RpcChannelImpl::connect End");
             return;
         } catch (const SaslException & e) {
             /*
              * Namenode may treat this connect as replay, retry later
              */
+            if (firstSaslException) {
+                std::lock_guard<std::mutex> lock(firstSaslExceptionMutex);
+                if (firstSaslException) {
+                    firstSaslException = false;
+                    socket->close();
+                    if(!rpcConfig.getSessionConfig().getNamenodeKerberosPrincipal().empty() &&
+                        !rpcConfig.getSessionConfig().getNamenodeKerberosKeytabFile().empty()){
+                        stringstream ss;
+                        ss<<"kinit -kt "<<rpcConfig.getSessionConfig().getNamenodeKerberosKeytabFile()<<" ";
+                        ss<<rpcConfig.getSessionConfig().getNamenodeKerberosPrincipal();
+                        std::string command = ss.str();
+                        LOG(DEBUG1, "Run command: [%s]", command.c_str());
+                        try {
+                            system(command.c_str());
+                            sleep_for(milliseconds(100));
+                            continue;
+                        } catch (const std::exception & err) {
+                            LOG(LOG_ERROR,
+                                "Failed to executing command[%s]: %s", command.c_str(), err.what());
+                            try {
+                                NESTED_THROW(HdfsNetworkConnectException,
+                                             "Failed to setup RPC connection to \"%s:%s\" caused by:\n%s",
+                                             server.getHost().c_str(), server.getPort().c_str(), err.what());
+                            } catch (const HdfsRpcException & e) {
+                                lastError = current_exception();
+                            }
+                            break;
+                        }
+                    }
+                }
+            } 
             sleep = (rand() % 5) + 1;
             lastError = current_exception();
             LOG(LOG_ERROR,
                 "Failed to setup RPC connection to \"%s:%s\" caused by:\n%s",
-                server.getHost().c_str(), server.getPort().c_str(), GetExceptionDetail(e, buffer));
+                server.getHost().c_str(), server.getPort().c_str(), GetExceptionDetail(e));
+        } catch (const HdfsFailoverException & e) {
+            sleep = 1;
+            lastError = current_exception();
+        } catch (const HdfsNetworkConnectException & e) {
+            sleep = 1;
+            lastError = current_exception();
+            //LOG(LOG_ERROR,
+            //    "Failed to setup RPC connection to \"%s:%s\" caused by:\n%s",
+            //    server.getHost().c_str(), server.getPort().c_str(), GetExceptionDetail(e));
+            //socket->close();
+            //break;
         } catch (const HdfsNetworkException & e) {
             sleep = 1;
             lastError = current_exception();
             LOG(LOG_ERROR,
                 "Failed to setup RPC connection to \"%s:%s\" caused by:\n%s",
-                server.getHost().c_str(), server.getPort().c_str(), GetExceptionDetail(e, buffer));
+                server.getHost().c_str(), server.getPort().c_str(), GetExceptionDetail(e));
         } catch (const HdfsTimeoutException & e) {
             sleep = 1;
             lastError = current_exception();
             LOG(LOG_ERROR,
                 "Failed to setup RPC connection to \"%s:%s\" caused by:\n%s",
-                server.getHost().c_str(), server.getPort().c_str(), GetExceptionDetail(e, buffer));
+                server.getHost().c_str(), server.getPort().c_str(), GetExceptionDetail(e));
+        } catch (const HdfsIOException & e) {
+            sleep = 1;
+            lastError = current_exception();
+            LOG(LOG_ERROR, "HdfsIOException: %s", e.msg());
+        } catch (const HdfsException & e) {
+            lastError = current_exception();
+            LOG(LOG_ERROR, "HdfsException: %s", e.msg());
+            socket->close();
+            break;
         }
 
-        if (i + 1 < conf.getMaxRetryOnConnect()) {
+        if (i + 1 < rpcConfig.getMaxRetryOnConnect()) {
             LOG(INFO,
                 "Retrying connect to server: \"%s:%s\". Already tried %d time(s)",
                 server.getHost().c_str(), server.getPort().c_str(), i + 1);
         }
 
-        sock->close();
+        socket->close();
         CheckOperationCanceled();
         sleep_for(seconds(sleep));
     }
-
+    if (!lastError) {
+        try {
+            NESTED_THROW(HdfsRpcException,
+                        "Failed to connect server: \"%s:%s\"",
+                        server.getHost().c_str(), server.getPort().c_str());
+        } catch (const HdfsRpcException & e) {
+            lastError = current_exception();
+        }
+    }
     rethrow_exception(lastError);
 }
 
@@ -340,10 +227,13 @@ exception_ptr RpcChannelImpl::invokeInternal(RpcRemoteCallPtr remote) {
             lock_guard<mutex> lock(writeMut);
 
             if (!available) {
+                LOG(DEBUG1, "RpcChannelImpl::invokeInternal->connect Begin");
                 connect();
+                LOG(DEBUG1, "RpcChannelImpl::invokeInternal->connect End");
             }
-
+            LOG(DEBUG1, "RpcChannelImpl::invokeInternal->sendRequest Begin");
             sendRequest(remote);
+            LOG(DEBUG1, "RpcChannelImpl::invokeInternal->sendRequest End");
         }
 
         /*
@@ -434,21 +324,26 @@ void RpcChannelImpl::invoke(const RpcCall & call) {
             if (lastError) {
                 lock_guard<mutex> lock(writeMut);
                 shutdown(lastError);
-
-                if (!retry && call.isIdempotent()) {
-                    retry = true;
-                    std::string buffer;
-                    LOG(LOG_ERROR,
-                        "Failed to invoke RPC call \"%s\" on server \"%s:%s\": \n%s",
-                        call.getName(), key.getServer().getHost().c_str(),
-                        key.getServer().getPort().c_str(),
-                        GetExceptionDetail(lastError, buffer));
-                    LOG(INFO,
-                        "Retry idempotent RPC call \"%s\" on server \"%s:%s\"",
-                        call.getName(), key.getServer().getHost().c_str(),
-                        key.getServer().getPort().c_str());
-                } else {
+                try {
                     rethrow_exception(lastError);
+                } catch(const HdfsFailoverException & e){
+                    
+                    rethrow_exception(lastError);
+                } catch(...) {
+                    if (!retry && call.isIdempotent()) {
+                        retry = true;
+                        LOG(LOG_ERROR,
+                            "Failed to invoke RPC call \"%s\" on server \"%s:%s\": \n%s",
+                            call.getName(), key.getServer().getHost().c_str(),
+                            key.getServer().getPort().c_str(),
+                            GetExceptionDetail(lastError));
+                        LOG(INFO,
+                            "Retry idempotent RPC call \"%s\" on server \"%s:%s\"",
+                            call.getName(), key.getServer().getHost().c_str(),
+                            key.getServer().getPort().c_str());
+                    } else {
+                        rethrow_exception(lastError);
+                    }
                 }
             } else {
                 break;
@@ -504,7 +399,7 @@ void RpcChannelImpl::shutdown(exception_ptr reason) {
     assert(reason != exception_ptr());
     available = false;
     cleanupPendingCalls(reason);
-    sock->close();
+    socket->close();
 }
 
 void RpcChannelImpl::wakeupOneCaller(int32_t id) {
@@ -521,14 +416,16 @@ void RpcChannelImpl::wakeupOneCaller(int32_t id) {
 }
 
 void RpcChannelImpl::sendRequest(RpcRemoteCallPtr remote) {
+    LOG(DEBUG1, "RpcChannelImpl::sendRequest Begin");
     WriteBuffer buffer;
     assert(true == available);
     remote->serialize(key.getProtocol(), buffer);
-    sock->writeFully(buffer.getBuffer(0), buffer.getDataSize(0),
+    socket->writeFully(buffer.getBuffer(0), buffer.getDataSize(0),
                      key.getConf().getWriteTimeout());
     uint32_t id = remote->getIdentity();
     pendingCalls[id] = remote;
     lastActivity = lastIdle = steady_clock::now();
+    LOG(DEBUG1, "RpcChannelImpl::sendRequest End");
 }
 
 void RpcChannelImpl::cleanupPendingCalls(exception_ptr reason) {
@@ -544,6 +441,7 @@ void RpcChannelImpl::cleanupPendingCalls(exception_ptr reason) {
 }
 
 void RpcChannelImpl::checkOneResponse() {
+    //LOG(INFO, "RpcChannelImpl::checkOneResponse Begin");
     int ping = key.getConf().getPingTimeout();
     int timeout = key.getConf().getRpcTimeout();
     steady_clock::time_point start = steady_clock::now();
@@ -553,7 +451,7 @@ void RpcChannelImpl::checkOneResponse() {
             readOneResponse(true);
             return;
         } else {
-            if (ping > 0 && ToMilliSeconds(lastActivity.load(std::memory_order_relaxed), steady_clock::now()) >= ping) {
+            if (ping > 0 && ToMilliSeconds(lastActivity, steady_clock::now()) >= ping) {
                 lock_guard<mutex> lock(writeMut);
                 sendPing();
             }
@@ -569,18 +467,23 @@ void RpcChannelImpl::checkOneResponse() {
             }
         }
     }
+    //LOG(INFO, "RpcChannelImpl::checkOneResponse End");
 }
 
 void RpcChannelImpl::sendPing() {
+    //LOG(INFO, "RpcChannelImpl::sendPing Begin");
     static const std::vector<char> pingRequest = RpcRemoteCall::GetPingRequest(client.getClientId());
 
     if (available) {
+        //LOG(INFO, "RpcChannelImpl::sendPing->available Begin");
         LOG(INFO,
             "RPC channel to \"%s:%s\" got no response or idle for %d milliseconds, sending ping.",
             key.getServer().getHost().c_str(), key.getServer().getPort().c_str(), key.getConf().getPingTimeout());
-        sock->writeFully(pingRequest.data(), pingRequest.size(), key.getConf().getWriteTimeout());
+        socket->writeFully(&pingRequest[0], pingRequest.size(), key.getConf().getWriteTimeout());
         lastActivity = steady_clock::now();
+        //LOG(INFO, "RpcChannelImpl::sendPing->available End");
     }
+    //LOG(INFO, "RpcChannelImpl::sendPing End");
 }
 
 bool RpcChannelImpl::checkIdle() {
@@ -597,24 +500,20 @@ bool RpcChannelImpl::checkIdle() {
 
         try {
             //close the connection if idle timeout
-            if (ToMilliSeconds(lastIdle.load(std::memory_order_relaxed), steady_clock::now()) >= idle) {
-                sock->close();
+            if (ToMilliSeconds(lastIdle, steady_clock::now()) >= idle) {
+                socket->close();
                 return true;
             }
 
             //send ping
-            if (ping > 0 && ToMilliSeconds(lastActivity.load(std::memory_order_relaxed), steady_clock::now()) >= ping) {
+            if (ping > 0 && ToMilliSeconds(lastActivity, steady_clock::now()) >= ping) {
                 sendPing();
             }
         } catch (...) {
-            std::string buffer;
             LOG(LOG_ERROR,
-                "Failed to send ping via idle RPC channel to server \"%s:%s\": "
-                "\n%s",
-                key.getServer().getHost().c_str(),
-                key.getServer().getPort().c_str(),
-                GetExceptionDetail(current_exception(), buffer));
-            sock->close();
+                "Failed to send ping via idle RPC channel to server \"%s:%s\": \n%s",
+                key.getServer().getHost().c_str(), key.getServer().getPort().c_str(), GetExceptionDetail(current_exception()));
+            socket->close();
             return true;
         }
     }
@@ -645,34 +544,41 @@ void RpcChannelImpl::waitForExit() {
  * +----------------------------------+
  */
 void RpcChannelImpl::sendConnectionHeader(const RpcAuth &auth) {
+    //LOG(INFO, "RpcChannelImpl::sendConnectionHeader Begin.");
     WriteBuffer buffer;
     buffer.write(RPC_HEADER_MAGIC, strlen(RPC_HEADER_MAGIC));
     buffer.write(static_cast<char>(RPC_HEADER_VERSION));
     buffer.write(static_cast<char>(0));  //for future feature
     buffer.write(static_cast<char>(auth.getProtocol()));
-    sock->writeFully(buffer.getBuffer(0), buffer.getDataSize(0),
+    socket->writeFully(buffer.getBuffer(0), buffer.getDataSize(0),
                      key.getConf().getWriteTimeout());
+    //LOG(INFO, "RpcChannelImpl::sendConnectionHeader End.");
 }
 
 void RpcChannelImpl::buildConnectionContext(
     IpcConnectionContextProto & connectionContext, const RpcAuth & auth) {
+
+    LOG(DEBUG1, "RpcChannelImpl::buildConnectionContext Begin.");
     connectionContext.set_protocol(key.getProtocol().getProtocol());
+    LOG(DEBUG1, "RpcChannelImpl::buildConnectionContext euser: %s", key.getAuth().getUser().getPrincipal().c_str());
+    LOG(DEBUG1, "RpcChannelImpl::buildConnectionContext ruser: %s", key.getAuth().getUser().getRealUser().c_str());
     std::string euser = key.getAuth().getUser().getPrincipal();
     std::string ruser = key.getAuth().getUser().getRealUser();
 
     if (auth.getMethod() != AuthMethod::TOKEN) {
         UserInformationProto * user = connectionContext.mutable_userinfo();
         user->set_effectiveuser(euser);
-
         if (auth.getMethod() != AuthMethod::SIMPLE) {
             if (!ruser.empty() && ruser != euser) {
                 user->set_realuser(ruser);
             }
         }
     }
+    LOG(DEBUG1, "RpcChannelImpl::buildConnectionContext End.");
 }
 
 void RpcChannelImpl::sendConnectionContent(const RpcAuth & auth) {
+    LOG(DEBUG1, "RpcChannelImpl::sendConnectionContent Begin.");
     WriteBuffer buffer;
     IpcConnectionContextProto connectionContext;
     RpcRequestHeaderProto rpcHeader;
@@ -686,9 +592,10 @@ void RpcChannelImpl::sendConnectionContent(const RpcAuth & auth) {
     int size = wrapper.getLength();
     buffer.writeBigEndian(size);
     wrapper.writeTo(buffer);
-    sock->writeFully(buffer.getBuffer(0), buffer.getDataSize(0),
+    socket->writeFully(buffer.getBuffer(0), buffer.getDataSize(0),
                      key.getConf().getWriteTimeout());
     lastActivity = lastIdle = steady_clock::now();
+    LOG(DEBUG1, "RpcChannelImpl::sendConnectionContent End.");
 }
 
 RpcRemoteCallPtr RpcChannelImpl::getPendingCall(int32_t id) {
@@ -759,29 +666,21 @@ static exception_ptr HandlerRpcResponseException(exception_ptr e) {
 }
 
 void RpcChannelImpl::readOneResponse(bool writeLock) {
+    //LOG(INFO, "RpcChannelImpl::readOneResponse Begin");
     int readTimeout = key.getConf().getReadTimeout();
     std::vector<char> buffer(128);
     RpcResponseHeaderProto curRespHeader;
     RpcResponseHeaderProto::RpcStatusProto status;
-    uint32_t headerSize = 0, bodySize = 0;
-    in->readBigEndianInt32(readTimeout);
+    uint32_t totalen, headerSize = 0, bodySize = 0;
+    totalen = in->readBigEndianInt32(readTimeout);
     /*
      * read response header
      */
-    int32_t headerSizeInt = in->readVarint32(readTimeout);
-    if (headerSizeInt<=0) {
-
-        THROW(HdfsRpcException,
-              "RPC channel to \"%s:%s\" negative or zero headerSize for header.",
-          key.getServer().getHost().c_str(), key.getServer().getPort().c_str());
-
-    }
-
-    headerSize = headerSizeInt;
+    headerSize = in->readVarint32(readTimeout);
     buffer.resize(headerSize);
-    in->readFully(buffer.data(), headerSize, readTimeout);
+    in->readFully(&buffer[0], headerSize, readTimeout);
 
-    if (!curRespHeader.ParseFromArray(buffer.data(), headerSize)) {
+    if (!curRespHeader.ParseFromArray(&buffer[0], headerSize)) {
         THROW(HdfsRpcException,
               "RPC channel to \"%s:%s\" got protocol mismatch: RPC channel cannot parse response header.",
               key.getServer().getHost().c_str(), key.getServer().getPort().c_str())
@@ -803,27 +702,21 @@ void RpcChannelImpl::readOneResponse(bool writeLock) {
             rc = getPendingCall(curRespHeader.callid());
         }
 
-        int32_t bodySizeInt = in->readVarint32(readTimeout);
-        // assert(bodySizeInt > 0);
-        if (bodySizeInt<0) {
-            THROW(HdfsRpcException,
-                "RPC channel to \"%s:%s\" negative bodySize.",
-                key.getServer().getHost().c_str(), key.getServer().getPort().c_str());
-        }
-        bodySize = bodySizeInt;
+        bodySize = in->readVarint32(readTimeout);
+        buffer.resize(bodySize);
 
         if (bodySize > 0) {
-            buffer.resize(bodySize);
-            in->readFully(buffer.data(), bodySize, readTimeout);
-
-            Message * response = rc->getCall().getResponse();
-
-            if (!response->ParseFromArray(buffer.data(), bodySize)) {
-                THROW(HdfsRpcException,
-                    "RPC channel to \"%s:%s\" got protocol mismatch: rpc channel cannot parse response.",
-                    key.getServer().getHost().c_str(), key.getServer().getPort().c_str());
-            }
+            in->readFully(&buffer[0], bodySize, readTimeout);
         }
+
+        Message * response = rc->getCall().getResponse();
+
+        if (!response->ParseFromArray(&buffer[0], bodySize)) {
+            THROW(HdfsRpcException,
+                  "RPC channel to \"%s:%s\" got protocol mismatch: rpc channel cannot parse response.",
+                  key.getServer().getHost().c_str(), key.getServer().getPort().c_str())
+        }
+
         rc->done();
     } else {
         /*
@@ -866,6 +759,7 @@ void RpcChannelImpl::readOneResponse(bool writeLock) {
             }
         }
     }
+    //LOG(INFO, "RpcChannelImpl::readOneResponse End");
 }
 
 }

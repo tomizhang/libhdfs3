@@ -41,7 +41,7 @@ static inline std::vector<std::string> StringSplit(const std::string & str,
     char * token, *lasts = NULL;
     std::string s = str;
     std::vector<std::string> retval;
-    token = strtok_r(s.data(), sep, &lasts);
+    token = strtok_r(&s[0], sep, &lasts);
 
     while (token) {
         retval.push_back(token);
@@ -99,6 +99,18 @@ static inline bool StringReplaceAll(std::string& str, const std::string& from,
 
     return retval;
 }
+
+static inline bool contains(const std::string& str, const std::string& subStr) {
+    return str.find(subStr) != std::string::npos;
+}
+
+static inline bool StringStartsWith(const std::string & str, const std::string& prefix) {
+	if (prefix.size() > str.size()) {
+		return false;
+	}
+	return equal(prefix.begin(), prefix.end(), str.begin());
+}
+
 }
 }
 #endif /* _HDFS_LIBHDFS3_COMMON_STRINGUTIL_H_ */

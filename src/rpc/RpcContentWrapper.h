@@ -30,7 +30,7 @@
 
 #include <google/protobuf/message.h>
 
-#include "WriteBuffer.h"
+#include "common/WriteBuffer.h"
 
 namespace Hdfs {
 namespace Internal {

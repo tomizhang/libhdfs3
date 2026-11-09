@@ -241,23 +241,22 @@ ReadShortCircuitInfoBuilder::createReadShortCircuitInfo(
     const ReadShortCircuitInfoKey& key, const ExtendedBlock& block,
     const Token& token) {
   std::string addr = buildDomainSocketAddress(key.dnPort);
-  DomainSocketImpl sock;
-  sock.connect(addr.c_str(), 0, conf.getInputConnTimeout());
-  DataTransferProtocolSender sender(sock, conf.getInputWriteTimeout(), addr);
+  std::shared_ptr<Socket> socket = std::make_shared<DomainSocketImpl>();
+  socket->connect(addr.c_str(), 0, conf.getInputConnTimeout());
+  DataTransferProtocolSender sender(socket, conf.getInputWriteTimeout(), addr);
   sender.requestShortCircuitFds(block, token, MaxReadShortCircuitVersion);
   shared_ptr<ReadShortCircuitFDHolder> fds =
-      receiveReadShortCircuitFDs(sock, block);
+      receiveReadShortCircuitFDs(socket, block);
   return createReadShortCircuitInfo(key, fds);
 }
 
 shared_ptr<ReadShortCircuitFDHolder>
 ReadShortCircuitInfoBuilder::receiveReadShortCircuitFDs(
-    Socket& sock, const ExtendedBlock& block) {
+    std::shared_ptr<Socket> socket, const ExtendedBlock& block) {
   std::vector<char> respBuffer;
   int readTimeout = conf.getInputReadTimeout();
-  shared_ptr<BufferedSocketReader> in(
-      new BufferedSocketReaderImpl(sock, 0));  // disable buffer
-  int32_t respSize = in->readVarint32(readTimeout);
+  shared_ptr<BufferedSocketReader> reader = std::make_shared<BufferedSocketReader>(socket, 0);
+  int32_t respSize = reader->readVarint32(readTimeout);
 
   if (respSize <= 0 || respSize > 10 * 1024 * 1024) {
     THROW(HdfsIOException,
@@ -268,10 +267,10 @@ ReadShortCircuitInfoBuilder::receiveReadShortCircuitFDs(
   }
 
   respBuffer.resize(respSize);
-  in->readFully(respBuffer.data(), respSize, readTimeout);
+  reader->readFully(&respBuffer[0], respSize, readTimeout);
   BlockOpResponseProto resp;
 
-  if (!resp.ParseFromArray(respBuffer.data(), respBuffer.size())) {
+  if (!resp.ParseFromArray(&respBuffer[0], respBuffer.size())) {
     THROW(HdfsIOException,
           "ReadShortCircuitInfoBuilder cannot parse BlockOpResponseProto "
           "from "
@@ -309,7 +308,7 @@ ReadShortCircuitInfoBuilder::receiveReadShortCircuitFDs(
     }
   }
 
-  DomainSocketImpl* domainSocket = dynamic_cast<DomainSocketImpl*>(&sock);
+  std::shared_ptr<DomainSocketImpl> domainSocket = std::static_pointer_cast<DomainSocketImpl>(socket);
 
   if (NULL == domainSocket) {
     THROW(HdfsIOException, "Read short-circuit only works with Domain Socket");
@@ -319,8 +318,8 @@ ReadShortCircuitInfoBuilder::receiveReadShortCircuitFDs(
 
   std::vector<int> tempFds(2, -1);
   respBuffer.resize(1);
-  domainSocket->receiveFileDescriptors(tempFds.data(), tempFds.size(),
-                                       respBuffer.data(), respBuffer.size());
+  domainSocket->receiveFileDescriptors(&tempFds[0], tempFds.size(),
+                                       &respBuffer[0], respBuffer.size());
 
   assert(tempFds[0] != -1 && "failed to receive data file descriptor");
   assert(tempFds[1] != -1 && "failed to receive metadata file descriptor");

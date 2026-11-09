@@ -30,7 +30,6 @@
 #include "InputStream.h"
 #include "InputStreamImpl.h"
 #include "InputStreamInter.h"
-#include "StripedInputStreamImpl.h"
 
 using namespace Hdfs::Internal;
 
@@ -38,14 +37,6 @@ namespace Hdfs {
 
 InputStream::InputStream() {
     impl = new Internal::InputStreamImpl;
-}
-
-InputStream::InputStream(shared_ptr<LocatedBlocks> lbs) {
-    if (lbs->getEcPolicy()) {
-        impl = new Internal::StripedInputStreamImpl(lbs);
-    } else {
-        impl = new Internal::InputStreamImpl(lbs);
-    }
 }
 
 InputStream::~InputStream() {
@@ -67,6 +58,10 @@ void InputStream::open(FileSystem & fs, const char * path,
     impl->open(fs.impl->filesystem, path, verifyChecksum);
 }
 
+    void InputStream::setHostname(const char *hostname) {
+        impl->setHostname(std::string(hostname));
+    }
+
 /**
  * To read data from hdfs.
  * @param buf the buffer used to filled.
@@ -78,23 +73,16 @@ int32_t InputStream::read(char * buf, int32_t size) {
 }
 
 /**
- * To read data from hdfs.
- * @param buf the buffer used to filled.
- * @param size buffer size.
- * @param position the position to seek.
- * @return return the number of bytes filled in the buffer, it may less than size.
- */
-int32_t InputStream::pread(char * buf, int32_t size, int64_t position) {
-    return impl->pread(buf, size, position);
-}
-
-/**
  * To read data from hdfs, block until get the given size of bytes.
  * @param buf the buffer used to filled.
  * @param size the number of bytes to be read.
  */
 void InputStream::readFully(char * buf, int64_t size) {
     impl->readFully(buf, size);
+}
+
+int32_t InputStream::pread(char * buf, int32_t size, int64_t position) {
+    return impl->pread(buf, size, position);
 }
 
 int64_t InputStream::available() {

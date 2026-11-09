@@ -29,6 +29,11 @@
 #define _HDFS_LIBHDFS3_MOCK_MOCKRPCCLIENT_H_
 
 #include "gmock/gmock.h"
+#include "rpc/RpcChannel.h"
+#include "rpc/RpcAuth.h"
+#include "rpc/RpcProtocolInfo.h"
+#include "rpc/RpcServerInfo.h"
+#include "rpc/RpcConfig.h"
 #include "rpc/RpcClient.h"
 
 using namespace Hdfs::Internal;
@@ -39,9 +44,11 @@ class MockRpcClient: public RpcClient {
 public:
 	MOCK_METHOD0(isRunning, bool());
 
-	MOCK_METHOD4(getChannel, RpcChannel & (const RpcAuth &,
-					const RpcProtocolInfo &, const RpcServerInfo &,
-					const RpcConfig &));
+	MOCK_METHOD4(getChannel, Hdfs::Internal::RpcChannel & (
+								const RpcAuth &,
+								const RpcProtocolInfo &, 
+								const RpcServerInfo &,
+								const RpcConfig &));
 
 	MOCK_CONST_METHOD0(getClientId, std::string());
 

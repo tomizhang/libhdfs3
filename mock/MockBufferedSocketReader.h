@@ -36,6 +36,10 @@ namespace Mock {
 
 class MockBufferedSocketReader: public Hdfs::Internal::BufferedSocketReader {
 public:
+	MockBufferedSocketReader() :
+		Hdfs::Internal::BufferedSocketReader(std::shared_ptr<Hdfs::Internal::Socket>()) {
+	}
+
 	MOCK_METHOD2(read, int32_t(char * b, int32_t s));
 	MOCK_METHOD3(readFully, void(char * b, int32_t s, int timeout));
 	MOCK_METHOD1(readBigEndianInt32, int32_t(int timeout));

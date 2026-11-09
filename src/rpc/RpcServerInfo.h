@@ -28,9 +28,8 @@
 #ifndef _HDFS_LIBHDFS3_RPC_RPCSERVERINFO_H_
 #define _HDFS_LIBHDFS3_RPC_RPCSERVERINFO_H_
 
-#include "Hash.h"
+#include "common/Hash.h"
 
-#include <cstdint>
 #include <string>
 #include <sstream>
 

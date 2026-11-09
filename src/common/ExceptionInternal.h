@@ -175,7 +175,7 @@ void ThrowException(bool nested, const char * f, int l,
     int offset = buffer.size();
     buffer.resize(offset + size + 1);
     va_start(ap, fmt);
-    vsnprintf(buffer.data() + offset, size + 1, fmt, ap);
+    vsnprintf(&buffer[offset], size + 1, fmt, ap);
     va_end(ap);
 
     if (!nested) {
@@ -201,12 +201,12 @@ namespace Internal {
 
 template<typename THROWABLE>
 ATTRIBUTE_NORETURN ATTRIBUTE_NOINLINE
-void ThrowException(bool nested, bool printStack, const char * f, int l,
-                    const char * exceptionName, const char * fmt, ...) __attribute__((format(printf, 6, 7)));
+void ThrowException(bool nested, const char * f, int l,
+                    const char * exceptionName, const char * fmt, ...) __attribute__((format(printf, 5, 6)));
 
 template<typename THROWABLE>
 ATTRIBUTE_NORETURN ATTRIBUTE_NOINLINE
-void ThrowException(bool nested, bool printStack, const char * f, int l,
+void ThrowException(bool nested, const char * f, int l,
                     const char * exceptionName, const char * fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -218,16 +218,16 @@ void ThrowException(bool nested, bool printStack, const char * f, int l,
     int offset = buffer.size();
     buffer.resize(offset + size + 1);
     va_start(ap, fmt);
-    vsnprintf(buffer.data() + offset, size + 1, fmt, ap);
+    vsnprintf(&buffer[offset], size + 1, fmt, ap);
     va_end(ap);
 
     if (!nested) {
         throw THROWABLE(buffer.c_str(), SkipPathPrefix(f), l,
-                        printStack ? Hdfs::Internal::PrintStack(1, STACK_DEPTH).c_str() : "");
+                        Hdfs::Internal::PrintStack(1, STACK_DEPTH).c_str());
     } else {
         Hdfs::throw_with_nested(
             THROWABLE(buffer.c_str(), SkipPathPrefix(f), l,
-                      printStack ? Hdfs::Internal::PrintStack(1, STACK_DEPTH).c_str() : ""));
+                      Hdfs::Internal::PrintStack(1, STACK_DEPTH).c_str()));
     }
 
     throw std::logic_error("should not reach here.");
@@ -266,8 +266,7 @@ bool CheckOperationCanceled();
  * @param e The exception which detail message to be return.
  * @return The exception's detail message.
  */
-const char *GetExceptionDetail(const Hdfs::HdfsException &e,
-                               std::string &buffer);
+const char * GetExceptionDetail(const Hdfs::HdfsException & e);
 
 /**
  * Get a exception's detail message.
@@ -275,7 +274,7 @@ const char *GetExceptionDetail(const Hdfs::HdfsException &e,
  * @param e The exception which detail message to be return.
  * @return The exception's detail message.
  */
-const char *GetExceptionDetail(const exception_ptr e, std::string &buffer);
+const char * GetExceptionDetail(const exception_ptr e);
 
 const char * GetExceptionMessage(const exception_ptr e, std::string & buffer);
 
@@ -291,12 +290,9 @@ const char * GetSystemErrorInfo(int eno);
 }
 
 #define THROW(throwable, fmt, ...) \
-    Hdfs::Internal::ThrowException<throwable>(false, true, __FILE__, __LINE__, #throwable, fmt, ##__VA_ARGS__);
+    Hdfs::Internal::ThrowException<throwable>(false, __FILE__, __LINE__, #throwable, fmt, ##__VA_ARGS__);
 
 #define NESTED_THROW(throwable, fmt, ...) \
-    Hdfs::Internal::ThrowException<throwable>(true, true, __FILE__, __LINE__, #throwable, fmt, ##__VA_ARGS__);
-
-#define THROW_NO_STACK(throwable, fmt, ...) \
-    Hdfs::Internal::ThrowException<throwable>(false, false, __FILE__, __LINE__, #throwable, fmt, ##__VA_ARGS__);
+    Hdfs::Internal::ThrowException<throwable>(true, __FILE__, __LINE__, #throwable, fmt, ##__VA_ARGS__);
 
 #endif /* _HDFS_LIBHDFS3_EXCEPTION_EXCEPTIONINTERNAL_H_ */

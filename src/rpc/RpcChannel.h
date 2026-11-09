@@ -28,20 +28,21 @@
 #ifndef _HDFS_LIBHDFS3_RPC_RPCCHANNEL_H_
 #define _HDFS_LIBHDFS3_RPC_RPCCHANNEL_H_
 
-#include "Atomic.h"
-#include "DateTime.h"
-#include "ExceptionInternal.h"
-#include "IpcConnectionContext.pb.h"
-#include "Memory.h"
+#include "common/Memory.h"
+#include "common/Thread.h"
+#include "common/Unordered.h"
+#include "common/Atomic.h"
+#include "common/DateTime.h"
+#include "common/ExceptionInternal.h"
+#include "common/SessionConfig.h"
 #include "network/BufferedSocketReader.h"
-#include "network/TcpSocket.h"
+#include "network/Socket.h"
 #include "RpcCall.h"
 #include "RpcChannelKey.h"
-#include "RpcHeader.pb.h"
 #include "RpcRemoteCall.h"
-#include "SaslClient.h"
-#include "Thread.h"
-#include "Unordered.h"
+#include "RpcClient.h"
+#include "RpcHeader.pb.h"
+#include "IpcConnectionContext.pb.h"
 
 #include <google/protobuf/message.h>
 
@@ -235,15 +236,6 @@ private:
      */
     void shutdown(exception_ptr reason);
 
-    const RpcSaslProto_SaslAuth * createSaslClient(
-        const ::google::protobuf::RepeatedPtrField<RpcSaslProto_SaslAuth> * auths);
-
-    void sendSaslMessage(RpcSaslProto * msg, ::google::protobuf::Message * resp);
-
-    std::string saslEvaluateToken(RpcSaslProto & response, bool serverIsDone);
-
-    RpcAuth setupSaslConnection();
-
 private:
     /**
      * Construct a RpcChannelImpl instance for test.
@@ -252,8 +244,8 @@ private:
      * @param in The BufferedSocketReader instance build on sock.
      * @param client The RpcClient instance.
      */
-    RpcChannelImpl(const RpcChannelKey & key, Socket * sock,
-                   BufferedSocketReader * in, RpcClient & client);
+    RpcChannelImpl(const RpcChannelKey & key, shared_ptr<Socket> s,
+                   shared_ptr<BufferedSocketReader> r, RpcClient & client);
 
 private:
     atomic<int> refs;
@@ -262,11 +254,10 @@ private:
     mutex writeMut;
     RpcChannelKey key;
     RpcClient & client;
+    shared_ptr<Socket> socket;
     shared_ptr<BufferedSocketReader> in;
-    shared_ptr<SaslClient> saslClient;
-    shared_ptr<Socket> sock;
-    std::atomic<steady_clock::time_point> lastActivity; // ping is a kind of activity, lastActivity will be updated after ping
-    std::atomic<steady_clock::time_point> lastIdle; // ping cannot change idle state. If there is still pending calls, lastIdle is always "NOW".
+    steady_clock::time_point lastActivity; // ping is a kind of activity, lastActivity will be updated after ping
+    steady_clock::time_point lastIdle; // ping cannot change idle state. If there is still pending calls, lastIdle is always "NOW".
     unordered_map<int32_t, RpcRemoteCallPtr> pendingCalls;
 };
 

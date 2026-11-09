@@ -29,7 +29,7 @@
 #define _HDFS_LIBHDFS3_RPC_RPCAUTH_H_
 
 #include "client/UserInfo.h"
-#include "Hash.h"
+#include "common/Hash.h"
 
 #include <string>
 

@@ -208,6 +208,5 @@ void PeerCache::addConnection(shared_ptr<Socket> peer,
 void PeerCache::clear() {
   GlobalPeerPool.clear();
 }
-
 }
 }

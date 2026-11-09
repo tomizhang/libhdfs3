@@ -31,7 +31,7 @@
 #include <string>
 #include <sstream>
 
-#include "Hash.h"
+#include "common/Hash.h"
 
 namespace Hdfs {
 namespace Internal {

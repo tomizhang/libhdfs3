@@ -31,6 +31,7 @@
 #include "SessionConfig.h"
 
 #include <sstream>
+#include <iostream>
 
 #define ARRAYSIZE(A) (sizeof(A) / sizeof(A[0]))
 
@@ -70,11 +71,7 @@ SessionConfig::SessionConfig(const Config & conf) {
         }, {
             &legacyLocalBlockReader, "dfs.client.use.legacy.blockreader.local", false
         }, {
-            &connectToDnViaHostname, "dfs.client.use.datanode.hostname", false
-        }, {
-            &readWriteMetricEnabled, "dfs.client.read.write.metric.enable", false
-        }, {
-            &slowDatanodeKickoutEnabled, "dfs.client.slow.datanode.kickout.enable", false
+            &dfsEncryptDataTransfer, "dfs.encrypt.data.transfer", false
         }
     };
     ConfigDefault<int32_t> i32Values[] = {
@@ -91,7 +88,7 @@ SessionConfig::SessionConfig(const Config & conf) {
         }, {
             &rpcSocketLingerTimeout, "rpc.client.socekt.linger.timeout", -1
         }, {
-            &rpcMaxRetryOnConnect, "rpc.client.connect.retry", 10, bind(CheckRangeGE<int32_t>, _1, _2, 1)
+            &rpcMaxRetryOnConnect, "rpc.client.connect.retry", 3, bind(CheckRangeGE<int32_t>, _1, _2, 1)
         }, {
             &rpcTimeout, "rpc.client.timeout", 3600 * 1000
         }, {
@@ -139,34 +136,28 @@ SessionConfig::SessionConfig(const Config & conf) {
         }, {
             &socketCacheCapacity, "dfs.client.socketcache.capacity", 64, bind(CheckRangeGE<int32_t>, _1, _2, 0)
         }, {
-            &stripeReaderThreadPoolSize, "dfs.client.read.striped.thread-pool.size", 64
-        }, {
-            &slowCacheSizeMax, "dfs.client.slow.cache.size.max", 100, bind(CheckRangeGE<int32_t>, _1, _2, 0)
+            &dfsEncryptDataTransferCipherKeyBitlength, "dfs.encrypt.data.transfer.cipher.key.bitlength", 256
         }
     };
     ConfigDefault<int64_t> i64Values [] = {
         {
             &defaultBlockSize, "dfs.default.blocksize", 64 * 1024 * 1024, bind(CheckMultipleOf<int64_t>, _1, _2, 512)
-        }, {
-            &slowCacheExpirationMs, "dfs.client.slow.cache.expiration.ms", 12LL * 60 * 60 * 1000,
-            bind(CheckRangeGE<int64_t>, _1, _2, 0)
-        }, {
-            &slowDownstreamWarningThresholdMs, "dfs.client.slow.downstream.warning.threshold.ms", 1000,
-            bind(CheckRangeGE<int64_t>, _1, _2, 0)
-        }, {
-            &slowDownstreamWarningCount, "dfs.client.slow.downstream.warning.count", 20,
-            bind(CheckRangeGE<int64_t>, _1, _2, 1)
-        }, {
-            &slowDownstreamWarningIntervalSeconds, "dfs.client.slow.downstream.warning.interval.seconds", 300,
-            bind(CheckRangeGE<int64_t>, _1, _2, 1)
         }
     };
     ConfigDefault<std::string> strValues [] = {
         {&defaultUri, "dfs.default.uri", "hdfs://localhost:9000" },
         {&rpcAuthMethod, "hadoop.security.authentication", "simple" },
+        {&nameservices, "dfs.nameservices", "" },
+        {&nnKerberosPrincipal, "dfs.namenode.kerberos.principal", "" },
+        {&nnKerberosKeytabFile, "dfs.namenode.keytab.file", "" },
+        {&dnKerberosPrincipal, "dfs.datanode.kerberos.principal", "" },
+        {&dnKerberosKeytabFile, "dfs.datanode.keytab.file", "" },
         {&kerberosCachePath, "hadoop.security.kerberos.ticket.cache.path", "" },
         {&logSeverity, "dfs.client.log.severity", "INFO" },
-        {&domainSocketPath, "dfs.domain.socket.path", ""}
+        {&domainSocketPath, "dfs.domain.socket.path", ""},
+        {&dfsDataTransferProtection, "dfs.data.transfer.protection", ""},
+        {&dfsEncryptDataTransferAlgorithm, "dfs.encrypt.data.transfer.algorithm", ""},
+        {&dfsEncryptDataTransferCipherSuites, "dfs.encrypt.data.transfer.cipher.suites", ""}
     };
 
     for (size_t i = 0; i < ARRAYSIZE(boolValues); ++i) {
@@ -199,7 +190,7 @@ SessionConfig::SessionConfig(const Config & conf) {
     for (size_t i = 0; i < ARRAYSIZE(strValues); ++i) {
         *strValues[i].variable = conf.getString(strValues[i].key,
                                                 strValues[i].value);
-
+        //std::cout<<"SessionConfig["<<strValues[i].key<<"]: "<<*strValues[i].variable<<std::endl;
         if (strValues[i].check) {
             strValues[i].check(strValues[i].key, *strValues[i].variable);
         }

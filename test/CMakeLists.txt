@@ -1,7 +1,7 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
+cmake_minimum_required(VERSION 3.10)
 
 SET(TEST_WORKING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/data/)
-ADD_DEFINITIONS(-DGTEST_LANG_CXX11=0 -Dprivate=public -Dprotected=public -DDATA_DIR="${TEST_WORKING_DIR}/")
+ADD_DEFINITIONS(-DGTEST_LANG_CXX11=0 -fno-access-control -fno-delete-null-pointer-checks -DDATA_DIR="${TEST_WORKING_DIR}/")
 
 ADD_SUBDIRECTORY(function)
 ADD_SUBDIRECTORY(unit)

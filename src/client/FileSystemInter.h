@@ -38,6 +38,7 @@
 #include "FileSystemStats.h"
 #include "PeerCache.h"
 #include "Permission.h"
+#include "server/DataEncryptionKey.h"
 #include "server/LocatedBlocks.h"
 #include "SessionConfig.h"
 #include "Unordered.h"
@@ -52,7 +53,6 @@ namespace Internal {
 
 class InputStreamInter;
 class OutputStreamInter;
-class SlowNodeTracker;
 class FileSystemInter;
 
 struct FileSystemWrapper {
@@ -254,6 +254,10 @@ public:
     virtual bool truncate(const char * src, int64_t size) /* throw AccessControlException,
 	 FileNotFoundException, UnresolvedLinkException, HdfsIOException */ = 0;
 
+    virtual DataEncryptionKey getDataEncryptionKey() = 0;
+
+    virtual void clearDataEncryptionKey() = 0;
+
     /**
      * Get a valid Delegation Token.
      *
@@ -315,19 +319,18 @@ public:
      * @param replication block replication factor.
      * @param blockSize maximum block size.
      */
-    virtual FileStatus create(const std::string & src, const Permission & masked,
-                              int flag, bool createParent, short replication,
-                              int64_t blockSize) = 0;
+    virtual void create(const std::string & src, const Permission & masked,
+                        int flag, bool createParent, short replication,
+                        int64_t blockSize) = 0;
 
     /**
      * Append to the end of the file.
      *
      * @param src path of the file being created.
-     * @param flag create flag.
-     * @return return a pair of the last partial block and file status if any
+     * @return return the last partial block if any
      */
     virtual std::pair<shared_ptr<LocatedBlock>, shared_ptr<FileStatus> > append(
-        const std::string & src, const uint32_t & flag) = 0;
+        const std::string& src) = 0;
 
     /**
      * The client can give up on a block by calling abandonBlock().
@@ -336,11 +339,9 @@ public:
      *
      * @param b the block to be abandoned.
      * @param src the file which the block belongs to.
-     * @param fileId the inode id of the file.
      */
     virtual void abandonBlock(const ExtendedBlock & b,
-                              const std::string & srcr,
-                              int64_t fileId) = 0;
+                              const std::string & srcr) = 0;
 
     /**
      * A client that wants to write an additional block to the
@@ -357,13 +358,11 @@ public:
      * @param src the file being created
      * @param previous  previous block
      * @param excludeNodes a list of nodes that should not be allocated for the current block.
-     * @param fileId the inode id of the file.
      * @return return the new block.
      */
     virtual shared_ptr<LocatedBlock> addBlock(const std::string & src,
             const ExtendedBlock * previous,
-            const std::vector<DatanodeInfo> & excludeNodes,
-            int64_t fileId) = 0;
+            const std::vector<DatanodeInfo> & excludeNodes) = 0;
 
     /**
      * Get a datanode for an existing pipeline.
@@ -403,7 +402,7 @@ public:
      * @return return false if the client should retry.
      */
     virtual bool complete(const std::string & src,
-                          const ExtendedBlock * last, int64_t fileId) = 0;
+                          const ExtendedBlock * last) = 0;
 
     /**
      * The client wants to report corrupted blocks (blocks with specified
@@ -493,13 +492,6 @@ public:
      * @return return the peer cache.
      */
     virtual PeerCache& getPeerCache() = 0;
-
-    /**
-     * Get the slow DataNode tracker which is shared by all the input streams
-     * of this file system.
-     * @return return the slow DataNode tracker.
-     */
-    virtual shared_ptr<SlowNodeTracker> getSlowNodeTracker() = 0;
 };
 
 }

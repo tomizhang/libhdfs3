@@ -38,17 +38,16 @@
 #include "Logger.h"
 #include "OutputStream.h"
 #include "OutputStreamImpl.h"
-#include "SlowNodeTracker.h"
 #include "server/LocatedBlocks.h"
 #include "server/NamenodeInfo.h"
 #include "server/NamenodeProxy.h"
 #include "StringUtil.h"
 
-#include <random>
 #include <cstring>
 #include <inttypes.h>
 #include <libxml/uri.h>
 #include <strings.h>
+#include <iostream>
 
 namespace Hdfs {
 namespace Internal {
@@ -106,24 +105,19 @@ FileSystemImpl::FileSystemImpl(const FileSystemKey& key, const Config& c)
     : conf(c),
       key(key),
       openedOutputStream(0),
+      hasDataEncryptionKey(false),
       nn(NULL),
       sconf(c),
       user(key.getUser()) {
     static atomic<uint32_t> count(0);
     std::stringstream ss;
     ss.imbue(std::locale::classic());
-
-    std::minstd_rand rng((std::minstd_rand::result_type)time(nullptr)); /// a fast rng with bad quality is okay here
-    std::uniform_real_distribution<> distr(0.0, 1.0);
-    double rand = distr(rng);
-
-    ss << "libhdfs3_client_rand_" + std::to_string(rand) + "_count_" << ++count << "_pid_"
-       << getpid();
-
+    srand((unsigned int) time(NULL));
+    ss << "libhdfs3_client_random_" << rand() << "_count_" << ++count << "_pid_"
+       << getpid() << "_tid_" << pthread_self();
     clientName = ss.str();
     workingDir = std::string("/user/") + user.getEffectiveUser();
     peerCache = shared_ptr<PeerCache>(new PeerCache(sconf));
-    slowNodeTracker = shared_ptr<SlowNodeTracker>(new SlowNodeTracker(sconf));
 #ifdef MOCK
     stub = NULL;
 #endif
@@ -155,6 +149,7 @@ const char * FileSystemImpl::getClientName() {
 }
 
 void FileSystemImpl::connect() {
+    //LOG(DEBUG1, "FileSystemImpl::connect()");
     std::string host, port, uri;
     std::vector<NamenodeInfo> namenodeInfos;
 
@@ -165,6 +160,8 @@ void FileSystemImpl::connect() {
     host = key.getHost();
     port = key.getPort();
     uri += key.getScheme() + "://" + host;
+
+    //LOG(DEBUG1, "FileSystemImpl::connect()->uri: %s", uri.c_str());
 
     if (port.empty()) {
         try {
@@ -185,8 +182,28 @@ void FileSystemImpl::connect() {
     }
 
 #ifdef MOCK
+    std::cout<<"LOG FileSystemImpl::connect() MOCK.."<<std::endl;
     nn = stub->getNamenode();
 #else
+    //std::cout<<"LOG FileSystemImpl::connect() RpcAuth.."<<std::endl;
+    RpcAuth rpcAuth(user, RpcAuth::ParseMethod(sconf.getRpcAuthMethod()));
+    /*
+    if (rpcAuth.getMethod() == AuthMethod::SIMPLE){
+        LOG(DEBUG1, "FileSystemImpl::connect()->AuthMethod: SIMPLE");
+    } else if (rpcAuth.getMethod() == AuthMethod::KERBEROS) {
+        LOG(DEBUG1, "FileSystemImpl::connect()->AuthMethod: KERBEROS");
+    } else if (rpcAuth.getMethod() == AuthMethod::TOKEN) {
+        LOG(DEBUG1, "FileSystemImpl::connect()->AuthMethod: TOKEN");
+    } else if (rpcAuth.getMethod() == AuthMethod::UNKNOWN) {
+        LOG(DEBUG1, "FileSystemImpl::connect()->AuthMethod: UNKNOWN");
+    }
+    if (rpcAuth.getProtocol() == AuthProtocol::NONE ) {
+        LOG(DEBUG1, "FileSystemImpl::connect()->AuthProtocol: NONE");
+    } else if (rpcAuth.getProtocol() == AuthProtocol::SASL ) {
+        LOG(DEBUG1, "FileSystemImpl::connect()->AuthProtocol: SASL");
+    }
+    */
+    
     nn = new NamenodeProxy(namenodeInfos, tokenService, sconf, RpcAuth(user, RpcAuth::ParseMethod(sconf.getRpcAuthMethod())));
 #endif
     /*
@@ -593,6 +610,40 @@ bool FileSystemImpl::truncate(const char * path, int64_t size) {
     return nn->truncate(absPath, size, clientName);
 }
 
+/*
+ * The key is requested by every block reader and write pipeline, cache it
+ * to avoid a namenode RPC per block. A key with expiry date 0 means data
+ * transfer encryption is disabled, check it again after a while.
+ */
+DataEncryptionKey FileSystemImpl::getDataEncryptionKey() {
+    if (!nn) {
+        THROW(HdfsIOException, "FileSystemImpl: not connected.");
+    }
+
+    lock_guard<mutex> lock(mutDataEncryptionKey);
+    bool expired = !hasDataEncryptionKey;
+
+    if (!expired && dataEncryptionKey.getExpiryDate() != 0) {
+        int64_t now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+        expired = now >= static_cast<int64_t>(dataEncryptionKey.getExpiryDate()) - 60 * 1000;
+    } else if (!expired) {
+        expired = ToMilliSeconds(dataEncryptionKeyFetchTime, steady_clock::now()) >= 600 * 1000;
+    }
+
+    if (expired) {
+        dataEncryptionKey = nn->getDataEncryptionKey();
+        dataEncryptionKeyFetchTime = steady_clock::now();
+        hasDataEncryptionKey = true;
+    }
+
+    return dataEncryptionKey;
+}
+
+void FileSystemImpl::clearDataEncryptionKey() {
+    lock_guard<mutex> lock(mutDataEncryptionKey);
+    hasDataEncryptionKey = false;
+}
+
 std::string FileSystemImpl::getDelegationToken(const char * renewer) {
     if (!nn) {
         THROW(HdfsIOException, "FileSystemImpl: not connected.");
@@ -640,44 +691,42 @@ void FileSystemImpl::getBlockLocations(const std::string & src, int64_t offset,
     nn->getBlockLocations(src, offset, length, lbs);
 }
 
-FileStatus FileSystemImpl::create(const std::string & src, const Permission & masked,
-                                  int flag, bool createParent, short replication, int64_t blockSize) {
+void FileSystemImpl::create(const std::string & src, const Permission & masked,
+                            int flag, bool createParent, short replication, int64_t blockSize) {
     if (!nn) {
         THROW(HdfsIOException, "FileSystemImpl: not connected.");
     }
 
-    return nn->create(src, masked, clientName, flag, createParent, replication,
-                      blockSize);
+    nn->create(src, masked, clientName, flag, createParent, replication,
+               blockSize);
 }
 
 std::pair<shared_ptr<LocatedBlock>, shared_ptr<FileStatus> >
-FileSystemImpl::append(const std::string& src, const uint32_t& flag) {
+FileSystemImpl::append(const std::string& src) {
     if (!nn) {
         THROW(HdfsIOException, "FileSystemImpl: not connected.");
     }
 
-    return nn->append(src, clientName, flag);
+    return nn->append(src, clientName);
 }
 
 void FileSystemImpl::abandonBlock(const ExtendedBlock & b,
-                                  const std::string & src,
-                                  int64_t fileId) {
+                                  const std::string & src) {
     if (!nn) {
         THROW(HdfsIOException, "FileSystemImpl: not connected.");
     }
 
-    nn->abandonBlock(b, src, clientName, fileId);
+    nn->abandonBlock(b, src, clientName);
 }
 
 shared_ptr<LocatedBlock> FileSystemImpl::addBlock(const std::string & src,
         const ExtendedBlock * previous,
-        const std::vector<DatanodeInfo> & excludeNodes,
-        int64_t fileId) {
+        const std::vector<DatanodeInfo> & excludeNodes) {
     if (!nn) {
         THROW(HdfsIOException, "FileSystemImpl: not connected.");
     }
 
-    return nn->addBlock(src, clientName, previous, excludeNodes, fileId);
+    return nn->addBlock(src, clientName, previous, excludeNodes);
 }
 
 shared_ptr<LocatedBlock> FileSystemImpl::getAdditionalDatanode(
@@ -694,13 +743,12 @@ shared_ptr<LocatedBlock> FileSystemImpl::getAdditionalDatanode(
 }
 
 bool FileSystemImpl::complete(const std::string & src,
-                              const ExtendedBlock * last,
-                              int64_t fileId) {
+                              const ExtendedBlock * last) {
     if (!nn) {
         THROW(HdfsIOException, "FileSystemImpl: not connected.");
     }
 
-    return nn->complete(src, clientName, last, fileId);
+    return nn->complete(src, clientName, last);
 }
 
 /*void FileSystemImpl::reportBadBlocks(const std::vector<LocatedBlock> & blocks) {
@@ -763,10 +811,9 @@ bool FileSystemImpl::renewLease() {
         nn->renewLease(clientName);
         return true;
     } catch (const HdfsException & e) {
-        std::string buffer;
         LOG(LOG_ERROR,
             "Failed to renew lease for filesystem which client name is %s, since:\n%s",
-            getClientName(), GetExceptionDetail(e, buffer));
+            getClientName(), GetExceptionDetail(e));
     } catch (const std::exception & e) {
         LOG(LOG_ERROR,
             "Failed to renew lease for filesystem which client name is %s, since:\n%s",

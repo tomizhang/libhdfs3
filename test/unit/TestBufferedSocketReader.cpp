@@ -39,13 +39,13 @@ using namespace testing;
 
 class TestBufferedSocketReader: public ::testing::Test {
 public:
-    TestBufferedSocketReader() :
-        reader(sock) {
+    TestBufferedSocketReader(): sock(std::make_shared<MockSocket>()), reader(BufferedSocketReader(sock)) {
+        
     }
 
 public:
-    MockSocket sock;
-    BufferedSocketReaderImpl reader;
+    std::shared_ptr<MockSocket> sock;
+    BufferedSocketReader reader;
 };
 
 static int32_t ReadAction(char * buffer, int32_t size, const char * target,
@@ -66,7 +66,7 @@ TEST_F(TestBufferedSocketReader, TestRead) {
     ASSERT_EQ(0, reader.cursor);
     char readData[64];
     int rsize = sizeof(readData);
-    EXPECT_CALL(sock, read(_, _)).Times(1).WillOnce(
+    EXPECT_CALL(*sock.get(), read(_, _)).Times(1).WillOnce(
         Invoke(bind(&ReadAction, _1, _2, readData, rsize)));
     /*
      * fill the buffer, read from buffer.
@@ -103,7 +103,7 @@ TEST_F(TestBufferedSocketReader, TestReadFully) {
     ASSERT_EQ(0, reader.cursor);
     char readData[64];
     int rsize = sizeof(readData);
-    EXPECT_CALL(sock, readFully(_, _, 500)).Times(1).WillOnce(
+    EXPECT_CALL(*sock.get(), readFully(_, _, 500)).Times(1).WillOnce(
         Invoke(bind(&ReadFullyAction, _1, _2, _3, readData, rsize)));
     /*
      * fill the buffer, read from buffer.
@@ -156,9 +156,9 @@ TEST_F(TestBufferedSocketReader, TestReadVarInt32) {
     char target[2];
     target[0] = 1;
     target[1] = 2;
-    EXPECT_CALL(sock, read(_, _)).Times(1).WillOnce(
+    EXPECT_CALL(*sock.get(), read(_, _)).Times(1).WillOnce(
         Invoke(bind(&ReadAction, _1, _2, target, sizeof(target))));
-    EXPECT_CALL(sock, poll(true, false, _)).WillOnce(Return(true));
+    EXPECT_CALL(*sock.get(), poll(true, false, _)).WillOnce(Return(true));
     EXPECT_EQ(1, reader.readVarint32(500));
     EXPECT_EQ(1, reader.size - reader.cursor);
     EXPECT_EQ(2, reader.readVarint32(500));
@@ -169,11 +169,11 @@ TEST_F(TestBufferedSocketReader, TestReadVarInt32) {
 }
 
 TEST_F(TestBufferedSocketReader, TestReadVarInt32_Failure) {
-    EXPECT_CALL(sock, poll(true, false, _)).Times(AnyNumber()).WillOnce(
+    EXPECT_CALL(*sock.get(), poll(true, false, _)).Times(AnyNumber()).WillOnce(
         Return(false)).WillRepeatedly(Return(true));
     char target[1];
     target[0] = -1;
-    EXPECT_CALL(sock, read(_, _)).Times(AnyNumber()).WillRepeatedly(
+    EXPECT_CALL(*sock.get(), read(_, _)).Times(AnyNumber()).WillRepeatedly(
         Invoke(bind(&ReadAction, _1, _2, target, sizeof(target))));
     EXPECT_THROW(reader.readVarint32(0), HdfsTimeoutException);
     EXPECT_THROW(reader.readVarint32(1000), HdfsNetworkException);

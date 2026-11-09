@@ -1,0 +1,82 @@
+
+variables:
+  GIT_STRATEGY: clone
+  GIT_DEPTH: 0
+
+.build_script: &build_script
+  - source /etc/bashrc||echo "."
+  - echo "OS_TAG=${OS_TAG}"
+  - echo $CI_PROJECT_DIR
+  - cd $CI_PROJECT_DIR
+  - git_hash=$(git log -1 --format=%h)
+  - echo "GIT_HASH->$git_hash"
+  - mkdir build||echo "."
+  - cd build && ../bootstrap --prefix=/usr/local
+  - make -j$(nproc)
+  - make install
+  - rm -f $CI_PROJECT_DIR/build/libhdfs3.*.tgz||echo "."
+  - cd /opt
+  - rm -rf ./libhdfs3||echo "."
+  - mkdir -p ./libhdfs3/lib||echo "."
+  - mkdir -p ./libhdfs3/include||echo "."
+  - cp /usr/local/lib/libhdfs3.so ./libhdfs3/lib/
+  - cp /usr/local/lib/libhdfs3.a ./libhdfs3/lib/
+  - cp -r /usr/local/include/hdfs ./libhdfs3/include/
+  - pkg_name="$CI_PROJECT_DIR/build/libhdfs3.${OS_TAG}_$(arch).$(date +%Y%m%d).$(date +%H%M%S).${git_hash}.tgz"
+  - tar -czvf $pkg_name libhdfs3
+
+.artifacts: &artifacts
+  name: "$CI_COMMIT_REF_NAME"
+  untracked: false
+  when: on_success
+  access: all
+  expire_in: 30 days
+  paths:
+    - "$CI_PROJECT_DIR/build/libhdfs3.*.tgz"
+
+stages:
+  - compile
+
+job-compile-centos7-x86_64:
+  stage: compile
+  image: vengine-hadoopfs-build:centos7-x86_64
+  tags:
+    - vengine
+    - linux
+    - x86_64
+  variables:
+    OS_TAG: "centos7"
+  script:
+    *build_script
+  artifacts:
+    *artifacts
+
+job-compile-centos7-aarch64:
+  stage: compile
+  image: vengine-hadoopfs-build:centos7-aarch64
+  tags:
+    - vengine
+    - linux
+    - aarch64
+  variables:
+    OS_TAG: "centos7"
+  script:
+    *build_script
+  artifacts:
+    *artifacts
+
+job-compile-kylin10sp1-aarch64:
+  stage: compile
+  image: vengine-hadoopfs-build:kylin10sp1-aarch64
+  tags:
+    - vengine
+    - linux
+    - aarch64
+  variables:
+    OS_TAG: "kylin10"
+  script:
+    *build_script
+  artifacts:
+    *artifacts
+
+

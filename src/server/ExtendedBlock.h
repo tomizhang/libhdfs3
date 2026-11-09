@@ -28,10 +28,9 @@
 #ifndef _HDFS_LIBHDFS3_SERVER_EXTENDEDBLOCK_H_
 #define _HDFS_LIBHDFS3_SERVER_EXTENDEDBLOCK_H_
 
-#include "Hash.h"
+#include "common/Hash.h"
 #include <string>
 #include <sstream>
-#define INVALID_POOL_ID "bp_invalid_id"
 
 namespace Hdfs {
 namespace Internal {
@@ -42,7 +41,7 @@ namespace Internal {
 class ExtendedBlock {
 public:
     ExtendedBlock() :
-        blockId(0), generationStamp(0), numBytes(0), poolId(INVALID_POOL_ID) {
+        blockId(0), generationStamp(0), numBytes(0) {
     }
 
     int64_t getBlockId() const {
