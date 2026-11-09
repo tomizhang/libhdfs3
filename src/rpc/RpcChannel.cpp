@@ -133,7 +133,7 @@ void RpcChannelImpl::connect() {
                     socket->close();
                     if(!rpcConfig.getSessionConfig().getNamenodeKerberosPrincipal().empty() &&
                         !rpcConfig.getSessionConfig().getNamenodeKerberosKeytabFile().empty()){
-                        stringstream ss;
+                        std::stringstream ss;
                         ss<<"kinit -kt "<<rpcConfig.getSessionConfig().getNamenodeKerberosKeytabFile()<<" ";
                         ss<<rpcConfig.getSessionConfig().getNamenodeKerberosPrincipal();
                         std::string command = ss.str();
