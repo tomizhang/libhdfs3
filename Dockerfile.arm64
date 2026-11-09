@@ -1,19 +1,20 @@
-FROM --platform=linux/arm64 ubuntu:22.04
+FROM --platform=linux/arm64 almalinux:8
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && apt-get install -y \
-    cmake \
-    g++ \
-    make \
-    libprotobuf-dev \
-    protobuf-compiler \
-    libxml2-dev \
-    libkrb5-dev \
-    uuid-dev \
-    libgsasl7-dev \
-    libboost-all-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN dnf install -y epel-release 'dnf-command(config-manager)' && \
+    (dnf config-manager --set-enabled powertools || dnf config-manager --set-enabled crb || true) && \
+    dnf install -y \
+        gcc \
+        gcc-c++ \
+        cmake \
+        make \
+        protobuf-devel \
+        protobuf-compiler \
+        libxml2-devel \
+        krb5-devel \
+        libuuid-devel \
+        libgsasl-devel \
+        boost-devel \
+    && dnf clean all
 
 WORKDIR /workspace
 COPY . /workspace
