@@ -133,23 +133,39 @@ public:
             ss<<"qop=\""<<qop<<"\"";
         }
 
-        delimiter(&first, ss);
-        ss<<"algorithm="<<algorithm;
-        ss<<",nonce=\""<<nonce<<"\"";
-        ss<<",charset="<<charset;
-        ss<<",cipher=\"";
-        for(uint32_t index=0; index < cipher.size(); index++)
-        {
-            if(index>0)
-            {
-                ss<<",";
-            }
-            ss<<cipher[index];
+        if(!algorithm.empty()){
+            delimiter(&first, ss);
+            ss<<"algorithm="<<algorithm;
         }
-        ss<<"\"";
+
+        if(!nonce.empty()){
+            delimiter(&first, ss);
+            ss<<"nonce=\""<<nonce<<"\"";
+        }
+
+        if(!charset.empty()){
+            delimiter(&first, ss);
+            ss<<"charset="<<charset;
+        }
+
+        if(!cipher.empty()){
+            delimiter(&first, ss);
+            ss<<"cipher=\"";
+            for(uint32_t index=0; index < cipher.size(); index++)
+            {
+                if(index>0)
+                {
+                    ss<<",";
+                }
+                ss<<cipher[index];
+            }
+            ss<<"\"";
+        }
+
         if(!rspauth.empty())
         {
-            ss<<",rspauth=\""<<rspauth<<"\"";
+            delimiter(&first, ss);
+            ss<<"rspauth=\""<<rspauth<<"\"";
         }
         return ss.str();
     }

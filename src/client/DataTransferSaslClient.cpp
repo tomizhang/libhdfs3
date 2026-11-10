@@ -104,26 +104,26 @@ std::string chooseDataTransferQop(const std::string & clientProtection,
             THROW(SaslException,
                   "Data transfer privacy required but server QOP has no auth-conf");
         }
-        return "qop-conf";
+        return "auth-conf";
     }
     if (wantInt) {
         if (!serverInt) {
             THROW(SaslException,
                   "Data transfer integrity required but server QOP has no auth-int");
         }
-        return "qop-int";
+        return "auth-int";
     }
     if (!serverAuth) {
         THROW(SaslException,
               "Data transfer authentication required but server QOP has no auth");
     }
-    return "qop-auth";
+    return "auth";
 }
 
 bool shouldWrapDataTransferSocket(const std::string & negotiatedGsaslQop,
                                   bool hasValidAesCtrCipher) {
-    return negotiatedGsaslQop == "qop-int" ||
-           negotiatedGsaslQop == "qop-conf" ||
+    return negotiatedGsaslQop == "auth-int" ||
+           negotiatedGsaslQop == "auth-conf" ||
            hasValidAesCtrCipher;
 }
 
@@ -463,32 +463,38 @@ std::shared_ptr<Socket> DataTransferSaslClientInternal::doHandshake(){
         //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_PASSWORD[Hex]: [%s]", stringToHex(token.getPassword()).c_str());
     }
     
-    //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_REALM: [%s]", payload.realms[0].c_str());
+    //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_REALM: [%s]", payload.realms.empty() ? "" : payload.realms[0].c_str());
     
     gsasl_property_set(session, GSASL_AUTHID, identifier.c_str());
-    gsasl_property_set(session, GSASL_AUTHZID, principal.c_str());
+    // NOTE: In DIGEST-MD5 token authentication, GSASL_AUTHZID must NOT be set to DataNode principal!
+    // Setting authzid causes DataNode to fail authorization or reject digest verification.
     gsasl_property_set(session, GSASL_PASSWORD, password.c_str());
-    gsasl_property_set(session, GSASL_REALM, payload.realms[0].c_str());
+    if (!payload.realms.empty()) {
+        gsasl_property_set(session, GSASL_REALM, payload.realms[0].c_str());
+    }
     gsasl_property_set(session, GSASL_HOSTNAME, "0");
     gsasl_property_set(session, GSASL_SERVICE, "hdfs");
     selectSaslQop(payload);
 
     //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->evaluateChallenge [1]");
-    std::string challenge = payload.toString();
+    std::string challenge = conf.getDfsEncryptDataTransferAlgorithm().empty()
+                                ? dataTransferEncryptorMessage.payload()
+                                : payload.toString();
     challenge = evaluateChallenge(challenge);
     
     selectCipherOption(dataTransferEncryptorMessage, cipherOption);
 
     //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->Send [2]");
-    sendSaslMessage(false, 
+    sendSaslMessage(false,
         DataTransferEncryptorMessageProto::DataTransferEncryptorStatus
-        ::DataTransferEncryptorMessageProto_DataTransferEncryptorStatus_SUCCESS, 
+        ::DataTransferEncryptorMessageProto_DataTransferEncryptorStatus_SUCCESS,
         challenge, std::string(), &cipherOption);
     
     //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->Read [2]");
     readSaslMessage(dataTransferEncryptorMessage);
-    Payload::Parse(dataTransferEncryptorMessage.payload(), payload);
-    if (payload.rspauth.empty()) {
+    Payload step2Payload;
+    Payload::Parse(dataTransferEncryptorMessage.payload(), step2Payload);
+    if (step2Payload.rspauth.empty()) {
         THROW(SaslException, "Sasl failed! rspauth is empty!");
     }
     //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->evaluateChallenge [2]");

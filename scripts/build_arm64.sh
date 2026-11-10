@@ -158,6 +158,22 @@ int main() {
         fprintf(stderr, "FATAL: DIGEST-MD5 client_start failed!\n");
         return 1;
     }
+    gsasl_property_set(s_digest, GSASL_AUTHID, "dGVzdC10b2tlbg==");
+    gsasl_property_set(s_digest, GSASL_PASSWORD, "cGFzc3dvcmQ=");
+    gsasl_property_set(s_digest, GSASL_REALM, "0");
+    gsasl_property_set(s_digest, GSASL_HOSTNAME, "0");
+    gsasl_property_set(s_digest, GSASL_SERVICE, "hdfs");
+    gsasl_property_set(s_digest, GSASL_QOP, "auth");
+    const char *dn_challenge = "realm=\"0\",nonce=\"0ljCKo2I4sUNP2SIwpryXfvoOS2Duk9FtMXGkHDO\",qop=\"auth,auth-int,auth-conf\",charset=utf-8,cipher=\"3des,rc4,des,rc4-56,rc4-40\",algorithm=md5-sess";
+    char *digest_out = NULL;
+    size_t digest_out_len = 0;
+    rc = gsasl_step(s_digest, dn_challenge, strlen(dn_challenge), &digest_out, &digest_out_len);
+    printf("DataTransfer DIGEST-MD5 step rc = %d (expected %d, GSASL_NEEDS_MORE)\n", rc, GSASL_NEEDS_MORE);
+    if (rc != GSASL_NEEDS_MORE) {
+        fprintf(stderr, "FATAL: DataTransfer DIGEST-MD5 challenge step failed: %d (%s)\n", rc, gsasl_strerror(rc));
+        return 1;
+    }
+    if (digest_out) free(digest_out);
     gsasl_finish(s_digest);
 
     gsasl_done(ctx);
