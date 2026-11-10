@@ -131,29 +131,24 @@ void RpcChannelImpl::connect() {
                 if (firstSaslException) {
                     firstSaslException = false;
                     socket->close();
-                    if(!rpcConfig.getSessionConfig().getNamenodeKerberosPrincipal().empty() &&
-                        !rpcConfig.getSessionConfig().getNamenodeKerberosKeytabFile().empty()){
-                        std::stringstream ss;
-                        ss<<"kinit -kt "<<rpcConfig.getSessionConfig().getNamenodeKerberosKeytabFile()<<" ";
-                        ss<<rpcConfig.getSessionConfig().getNamenodeKerberosPrincipal();
-                        std::string command = ss.str();
-                        LOG(DEBUG1, "Run command: [%s]", command.c_str());
-                        try {
-                            system(command.c_str());
-                            sleep_for(milliseconds(100));
-                            continue;
-                        } catch (const std::exception & err) {
-                            LOG(LOG_ERROR,
-                                "Failed to executing command[%s]: %s", command.c_str(), err.what());
-                            try {
-                                NESTED_THROW(HdfsNetworkConnectException,
-                                             "Failed to setup RPC connection to \"%s:%s\" caused by:\n%s",
-                                             server.getHost().c_str(), server.getPort().c_str(), err.what());
-                            } catch (const HdfsRpcException & e) {
-                                lastError = current_exception();
+                    const std::string & nnPrincipal = rpcConfig.getSessionConfig().getNamenodeKerberosPrincipal();
+                    const std::string & nnKeytab = rpcConfig.getSessionConfig().getNamenodeKerberosKeytabFile();
+                    if (!nnKeytab.empty()) {
+                        LOG(DEBUG1, "RpcChannelImpl::connect: Attempting in-process kinitFromKeytab for \"%s\" using \"%s\"",
+                            nnPrincipal.c_str(), nnKeytab.c_str());
+                        bool kinitOk = GSaslClient::kinitFromKeytab(nnPrincipal, nnKeytab, rpcConfig.getSessionConfig().getKerberosCachePath());
+                        if (!kinitOk) {
+                            std::stringstream ss;
+                            ss << "kinit -kt " << nnKeytab << " " << nnPrincipal;
+                            std::string command = ss.str();
+                            LOG(DEBUG1, "In-process kinit failed, attempting fallback command: [%s]", command.c_str());
+                            int cmdRes = system(command.c_str());
+                            if (cmdRes != 0) {
+                                LOG(LOG_ERROR, "Fallback command [%s] failed with code %d", command.c_str(), cmdRes);
                             }
-                            break;
                         }
+                        sleep_for(milliseconds(100));
+                        continue;
                     }
                 }
             } 

@@ -37,6 +37,8 @@
 #include "BufferedSocketReader.h"
 
 #include <string>
+#include <mutex>
+#include <cstring>
 #include <krb5/krb5.h>
 #include <gsasl.h>
 
@@ -148,6 +150,135 @@ void GSaslClient::decrypt(std::string & dst, const std::string_view & src) {
     }
     //LOG(DEBUG1, "GSaslClient::decrypt To: [%lu][%s]", outputSize, dataToHex((unsigned char *)output, outputSize).c_str());
     //LOG(DEBUG1, "GSaslClient::decrypt End");
+}
+
+bool GSaslClient::kinitFromKeytab(const std::string & principalName,
+                                  const std::string & keytabFile,
+                                  const std::string & ccachePath) {
+    if (keytabFile.empty()) {
+        return false;
+    }
+
+    static std::mutex s_kinitMutex;
+    std::lock_guard<std::mutex> lock(s_kinitMutex);
+
+    krb5_context ctx = NULL;
+    krb5_principal principal = NULL;
+    krb5_keytab keytab = NULL;
+    krb5_ccache ccache = NULL;
+    krb5_creds creds;
+    memset(&creds, 0, sizeof(creds));
+    krb5_error_code ec = 0;
+
+    ec = krb5_init_context(&ctx);
+    if (ec != 0) {
+        LOG(LOG_ERROR, "kinitFromKeytab: Failed to init krb5 context (%d)", ec);
+        return false;
+    }
+
+    do {
+        ec = krb5_kt_resolve(ctx, keytabFile.c_str(), &keytab);
+        if (ec != 0) {
+            const char * msg = krb5_get_error_message(ctx, ec);
+            LOG(LOG_ERROR, "kinitFromKeytab: Failed to resolve keytab \"%s\": %s",
+                keytabFile.c_str(), msg ? msg : "");
+            if (msg) krb5_free_error_message(ctx, msg);
+            break;
+        }
+
+        if (!principalName.empty()) {
+            ec = krb5_parse_name(ctx, principalName.c_str(), &principal);
+            if (ec != 0) {
+                const char * msg = krb5_get_error_message(ctx, ec);
+                LOG(LOG_ERROR, "kinitFromKeytab: Failed to parse principal \"%s\": %s",
+                    principalName.c_str(), msg ? msg : "");
+                if (msg) krb5_free_error_message(ctx, msg);
+                break;
+            }
+        } else {
+            // Read first principal from keytab
+            krb5_kt_cursor cursor = NULL;
+            krb5_keytab_entry entry;
+            ec = krb5_kt_start_seq_get(ctx, keytab, &cursor);
+            if (ec == 0) {
+                if ((ec = krb5_kt_next_entry(ctx, keytab, &entry, &cursor)) == 0) {
+                    ec = krb5_copy_principal(ctx, entry.principal, &principal);
+                    krb5_free_keytab_entry_contents(ctx, &entry);
+                }
+                krb5_kt_end_seq_get(ctx, keytab, &cursor);
+            }
+            if (ec != 0 || principal == NULL) {
+                LOG(LOG_ERROR, "kinitFromKeytab: Failed to extract principal from keytab \"%s\"", keytabFile.c_str());
+                break;
+            }
+        }
+
+        ec = krb5_get_init_creds_keytab(ctx, &creds, principal, keytab, 0, NULL, NULL);
+        if (ec != 0) {
+            const char * msg = krb5_get_error_message(ctx, ec);
+            char * parsedName = NULL;
+            krb5_unparse_name(ctx, principal, &parsedName);
+            LOG(LOG_ERROR, "kinitFromKeytab: Failed to acquire credentials from keytab \"%s\" for principal \"%s\": %s",
+                keytabFile.c_str(), parsedName ? parsedName : principalName.c_str(), msg ? msg : "");
+            if (parsedName) krb5_free_unparsed_name(ctx, parsedName);
+            if (msg) krb5_free_error_message(ctx, msg);
+            break;
+        }
+
+        if (!ccachePath.empty()) {
+            ec = krb5_cc_resolve(ctx, ccachePath.c_str(), &ccache);
+            setenv("KRB5CCNAME", ccachePath.c_str(), 1);
+        } else {
+            ec = krb5_cc_default(ctx, &ccache);
+        }
+
+        if (ec != 0) {
+            const char * msg = krb5_get_error_message(ctx, ec);
+            LOG(LOG_ERROR, "kinitFromKeytab: Failed to resolve ccache: %s", msg ? msg : "");
+            if (msg) krb5_free_error_message(ctx, msg);
+            break;
+        }
+
+        ec = krb5_cc_initialize(ctx, ccache, principal);
+        if (ec != 0) {
+            const char * msg = krb5_get_error_message(ctx, ec);
+            LOG(LOG_ERROR, "kinitFromKeytab: Failed to initialize ccache: %s", msg ? msg : "");
+            if (msg) krb5_free_error_message(ctx, msg);
+            break;
+        }
+
+        ec = krb5_cc_store_cred(ctx, ccache, &creds);
+        if (ec != 0) {
+            const char * msg = krb5_get_error_message(ctx, ec);
+            LOG(LOG_ERROR, "kinitFromKeytab: Failed to store credentials in ccache: %s", msg ? msg : "");
+            if (msg) krb5_free_error_message(ctx, msg);
+            break;
+        }
+
+        char * finalName = NULL;
+        krb5_unparse_name(ctx, principal, &finalName);
+        LOG(DEBUG1, "kinitFromKeytab: Successfully obtained and stored Kerberos ticket for %s using keytab %s",
+            finalName ? finalName : principalName.c_str(), keytabFile.c_str());
+        if (finalName) krb5_free_unparsed_name(ctx, finalName);
+    } while (0);
+
+    if (creds.client != NULL) {
+        krb5_free_cred_contents(ctx, &creds);
+    }
+    if (ccache != NULL) {
+        krb5_cc_close(ctx, ccache);
+    }
+    if (keytab != NULL) {
+        krb5_kt_close(ctx, keytab);
+    }
+    if (principal != NULL) {
+        krb5_free_principal(ctx, principal);
+    }
+    if (ctx != NULL) {
+        krb5_free_context(ctx);
+    }
+
+    return (ec == 0);
 }
 
 }

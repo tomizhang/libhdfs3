@@ -43,6 +43,7 @@
 #include <string>
 #include <iostream>
 #include <krb5/krb5.h>
+#include "network/SaslClient.h"
 
 using namespace Hdfs::Internal;
 
@@ -376,7 +377,9 @@ namespace Hdfs
                 principal = username;
             }
 
-            if (auth == AuthMethod::KERBEROS)
+            if (auth == AuthMethod::KERBEROS ||
+                !sconf.getNamenodeKerberosPrincipal().empty() ||
+                !sconf.getNamenodeKerberosKeytabFile().empty())
             {
                 principal = sconf.getNamenodeKerberosPrincipal();
                 //LOG(DEBUG1, "AuthMethod: KERBEROS, Principal: %s", principal.c_str());
@@ -389,11 +392,18 @@ namespace Hdfs
                         //LOG(DEBUG1, "AuthMethod: KERBEROS, Principal: %s, Keytab: %s", principal.c_str(), keytab.c_str());
                         //std::cout << "Keytab passed to FileSystem::connect is " << keytab << std::endl;
                         SetKRB5ClientKTName(keytab);
+                        GSaslClient::kinitFromKeytab(principal, keytab, sconf.getKerberosCachePath());
                     }
                 }
                 else if(!sconf.getKerberosCachePath().empty())
                 {
                     principal = ExtractPrincipalFromTicketCache(sconf.getKerberosCachePath());
+                }
+                else if(!sconf.getNamenodeKerberosKeytabFile().empty())
+                {
+                    std::string keytab = sconf.getNamenodeKerberosKeytabFile();
+                    SetKRB5ClientKTName(keytab);
+                    GSaslClient::kinitFromKeytab("", keytab, sconf.getKerberosCachePath());
                 }
             }
 

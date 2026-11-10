@@ -94,8 +94,6 @@ public:
 
     void decrypt(std::string & dst, const std::string_view & src) override;
 
-protected:
-
     inline static void setKRB5ClientKTName(const std::string & keytab) {
         if (!keytab.empty()) {
             if (0 != setenv("KRB5_CLIENT_KTNAME", keytab.c_str(), 1)) {
@@ -103,6 +101,12 @@ protected:
             }
         }
     }
+
+    static bool kinitFromKeytab(const std::string & principalName,
+                                const std::string & keytabFile,
+                                const std::string & ccachePath = "");
+
+protected:
 
     inline static std::string extractPrincipalFromTicketCache(const std::string &cachePath) {
         krb5_context cxt = NULL;

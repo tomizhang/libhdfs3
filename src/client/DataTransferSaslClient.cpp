@@ -144,10 +144,14 @@ DataTransferSaslClientInternal::DataTransferSaslClientInternal(const std::shared
         if (!principal.empty())
         {
             std::string keytab = conf.getDatanodeKerberosKeytabFile();
+            if (keytab.empty()) {
+                keytab = conf.getNamenodeKerberosKeytabFile();
+            }
             if (!keytab.empty())
             {
                 LOG(DEBUG1, "DataTransferSaslClientInternal->AuthMethod: KERBEROS, Principal: %s, Keytab: %s", principal.c_str(), keytab.c_str());
                 setKRB5ClientKTName(keytab);
+                kinitFromKeytab(principal, keytab, conf.getKerberosCachePath());
             }
         }
         else if(!conf.getKerberosCachePath().empty())

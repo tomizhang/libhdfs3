@@ -452,8 +452,13 @@ void RpcSaslClient::initKerberos(const RpcSaslProto_SaslAuth & auth) {
     if ((rc = gsasl_client_start(ctx, auth.mechanism().c_str(), &session)) != GSASL_OK) {
         THROW(SaslException, "Cannot initialize client (%d): %s", rc, gsasl_strerror(rc));
     }
-    if (!conf.getDatanodeKerberosKeytabFile().empty()) {
-        setKRB5ClientKTName(conf.getNamenodeKerberosKeytabFile());
+    std::string keytab = conf.getNamenodeKerberosKeytabFile();
+    if (keytab.empty()) {
+        keytab = conf.getDatanodeKerberosKeytabFile();
+    }
+    if (!keytab.empty()) {
+        setKRB5ClientKTName(keytab);
+        kinitFromKeytab(principal, keytab, conf.getKerberosCachePath());
     }
     LOG(DEBUG1, "RpcSaslClient::initKerberos->PRINCIPAL: %s", principal.c_str());
     LOG(DEBUG1, "RpcSaslClient::initKerberos->GSASL_SERVICE: %s", auth.protocol().c_str());
