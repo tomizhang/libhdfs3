@@ -133,32 +133,35 @@ echo "=== Verifying libhdfs3.so embedded GSASL runtime mechanisms ==="
 cat << 'EOF' > /tmp/check_hdfs3_sasl.c
 #include <gsasl.h>
 #include <stdio.h>
-#include <string.h>
 
 int main() {
     Gsasl *ctx = NULL;
-    if (gsasl_init(&ctx) != GSASL_OK) {
-        fprintf(stderr, "ERROR: gsasl_init failed via libhdfs3.so\n");
+    int rc = gsasl_init(&ctx);
+    if (rc != GSASL_OK) {
+        fprintf(stderr, "ERROR: gsasl_init failed: %d\n", rc);
         return 1;
     }
-    char *list = NULL;
-    gsasl_client_mechlist(ctx, &list);
-    printf("libhdfs3 embedded GSASL mechanisms: %s\n", list ? list : "(none)");
-    int gssapi = gsasl_client_support_p(ctx, "GSSAPI");
-    int digest_md5 = gsasl_client_support_p(ctx, "DIGEST-MD5");
-    printf("libhdfs3 GSSAPI support: %d\n", gssapi);
-    printf("libhdfs3 DIGEST-MD5 support: %d\n", digest_md5);
-    if (list) gsasl_free(list);
+
+    Gsasl_session *s_gssapi = NULL;
+    rc = gsasl_client_start(ctx, "GSSAPI", &s_gssapi);
+    printf("gsasl_client_start('GSSAPI') rc = %d (%s)\n", rc, gsasl_strerror(rc));
+    if (rc != GSASL_OK) {
+        fprintf(stderr, "FATAL: GSSAPI client_start failed!\n");
+        return 1;
+    }
+    gsasl_finish(s_gssapi);
+
+    Gsasl_session *s_digest = NULL;
+    rc = gsasl_client_start(ctx, "DIGEST-MD5", &s_digest);
+    printf("gsasl_client_start('DIGEST-MD5') rc = %d (%s)\n", rc, gsasl_strerror(rc));
+    if (rc != GSASL_OK) {
+        fprintf(stderr, "FATAL: DIGEST-MD5 client_start failed!\n");
+        return 1;
+    }
+    gsasl_finish(s_digest);
+
     gsasl_done(ctx);
-    if (!gssapi) {
-        fprintf(stderr, "FATAL: libhdfs3.so missing GSSAPI mechanism!\n");
-        return 1;
-    }
-    if (!digest_md5) {
-        fprintf(stderr, "FATAL: libhdfs3.so missing DIGEST-MD5 mechanism!\n");
-        return 1;
-    }
-    printf("SUCCESS: libhdfs3.so SASL mechanisms verified!\n");
+    printf("SUCCESS: libhdfs3.so embedded GSASL sessions (GSSAPI & DIGEST-MD5) verified!\n");
     return 0;
 }
 EOF
