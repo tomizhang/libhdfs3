@@ -4,16 +4,14 @@ set -ex
 echo "=== System glibc version ==="
 ldd --version | head -n 1
 
-echo "=== Configuring reliable DNF repositories ==="
-# Fix potential flaky mirrorlist by using direct baseurl
-sed -i -e 's~^mirrorlist=~#mirrorlist=~g' -e 's~^#baseurl=https://repo.almalinux.org/~baseurl=https://repo.almalinux.org/~g' /etc/yum.repos.d/almalinux*.repo 2>/dev/null || true
-
+echo "=== Installing system dependencies ==="
 for i in 1 2 3 4 5; do
     echo "Attempt $i: Installing epel-release and config-manager..."
     if dnf install -y epel-release 'dnf-command(config-manager)'; then
         break
     fi
-    sleep 3
+    dnf clean all || true
+    sleep 5
 done
 
 dnf config-manager --set-enabled powertools || dnf config-manager --set-enabled crb || true
@@ -24,13 +22,14 @@ for i in 1 2 3 4 5; do
         krb5-devel libuuid-devel openssl-devel boost-devel zlib-devel git file binutils; then
         break
     fi
-    sleep 3
+    dnf clean all || true
+    sleep 5
 done
 
 echo "=== Building static libgsasl 1.8.0 with -fPIC ==="
 cd /tmp
-wget -q --tries=3 --timeout=30 https://ftp.gnu.org/gnu/gsasl/gsasl-1.8.0.tar.gz || \
-wget -q --tries=3 --timeout=30 https://ftp.osuosl.org/pub/gnu/gsasl/gsasl-1.8.0.tar.gz
+curl -sSL --retry 3 --retry-delay 5 -o gsasl-1.8.0.tar.gz https://ftp.gnu.org/gnu/gsasl/gsasl-1.8.0.tar.gz || \
+curl -sSL --retry 3 --retry-delay 5 -o gsasl-1.8.0.tar.gz https://ftp.osuosl.org/pub/gnu/gsasl/gsasl-1.8.0.tar.gz
 tar -xzf gsasl-1.8.0.tar.gz
 cd gsasl-1.8.0
 ./configure --prefix=/usr/local --libdir=/usr/local/lib --enable-static --disable-shared --with-pic CFLAGS="-fPIC" --disable-nls --without-libidn --without-libntlm
@@ -40,7 +39,7 @@ cd /tmp && rm -rf gsasl-1.8.0*
 
 echo "=== Building static libxml2 2.9.14 with -fPIC ==="
 cd /tmp
-wget -q --tries=3 --timeout=30 https://download.gnome.org/sources/libxml2/2.9/libxml2-2.9.14.tar.xz
+curl -sSL --retry 3 --retry-delay 5 -o libxml2-2.9.14.tar.xz https://download.gnome.org/sources/libxml2/2.9/libxml2-2.9.14.tar.xz
 tar -xf libxml2-2.9.14.tar.xz
 cd libxml2-2.9.14
 ./configure --prefix=/usr/local --libdir=/usr/local/lib --enable-static --disable-shared --with-pic CFLAGS="-fPIC" --with-zlib --without-python --without-lzma
@@ -50,7 +49,7 @@ cd /tmp && rm -rf libxml2-2.9.14*
 
 echo "=== Building static protobuf 3.0.0 with -fPIC ==="
 cd /tmp
-wget -q --tries=3 --timeout=30 https://github.com/protocolbuffers/protobuf/releases/download/v3.0.0/protobuf-cpp-3.0.0.tar.gz
+curl -sSL --retry 3 --retry-delay 5 -o protobuf-cpp-3.0.0.tar.gz https://github.com/protocolbuffers/protobuf/releases/download/v3.0.0/protobuf-cpp-3.0.0.tar.gz
 tar -xzf protobuf-cpp-3.0.0.tar.gz
 cd protobuf-3.0.0
 ./configure --prefix=/usr/local --libdir=/usr/local/lib --enable-static --disable-shared --with-pic CFLAGS="-fPIC -w" CXXFLAGS="-fPIC -std=c++11 -w -O2"
