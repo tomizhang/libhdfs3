@@ -4,11 +4,28 @@ set -ex
 echo "=== System glibc version ==="
 ldd --version | head -n 1
 
-echo "=== Installing system dependencies ==="
-dnf install -y epel-release 'dnf-command(config-manager)'
+echo "=== Configuring reliable DNF repositories ==="
+# Fix potential flaky mirrorlist by using direct baseurl
+sed -i -e 's~^mirrorlist=~#mirrorlist=~g' -e 's~^#baseurl=https://repo.almalinux.org/~baseurl=https://repo.almalinux.org/~g' /etc/yum.repos.d/almalinux*.repo 2>/dev/null || true
+
+for i in 1 2 3 4 5; do
+    echo "Attempt $i: Installing epel-release and config-manager..."
+    if dnf install -y epel-release 'dnf-command(config-manager)'; then
+        break
+    fi
+    sleep 3
+done
+
 dnf config-manager --set-enabled powertools || dnf config-manager --set-enabled crb || true
-dnf install -y gcc gcc-c++ cmake make autoconf automake libtool wget tar xz diffutils \
-    krb5-devel libuuid-devel openssl-devel boost-devel zlib-devel git file binutils
+
+for i in 1 2 3 4 5; do
+    echo "Attempt $i: Installing core build dependencies..."
+    if dnf install -y gcc gcc-c++ cmake make autoconf automake libtool wget tar xz diffutils \
+        krb5-devel libuuid-devel openssl-devel boost-devel zlib-devel git file binutils; then
+        break
+    fi
+    sleep 3
+done
 
 echo "=== Building static libgsasl 1.8.0 with -fPIC ==="
 cd /tmp
