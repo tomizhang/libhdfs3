@@ -95,9 +95,9 @@ if [[ x"${CXX}" = x"" ]]; then
     CXX=g++
 fi
 
-c_compiler=`which ${CC}`
-cxx_compiler=`which ${CXX}`
-cmake=`which cmake`
+c_compiler=`command -v ${CC} 2>/dev/null || which ${CC} 2>/dev/null`
+cxx_compiler=`command -v ${CXX} 2>/dev/null || which ${CXX} 2>/dev/null`
+cmake=`command -v cmake 2>/dev/null || which cmake 2>/dev/null`
 
 if [[ ! -x ${c_compiler} ]]; then
     die "cannot found c compiler"

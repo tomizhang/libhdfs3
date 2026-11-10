@@ -19,7 +19,7 @@ dnf config-manager --set-enabled powertools || dnf config-manager --set-enabled 
 for i in 1 2 3 4 5; do
     echo "Attempt $i: Installing core build dependencies..."
     if dnf install -y gcc gcc-c++ cmake make autoconf automake libtool wget tar xz diffutils \
-        krb5-devel libuuid-devel openssl-devel boost-devel zlib-devel git file binutils; then
+        krb5-devel libuuid-devel openssl-devel boost-devel zlib-devel git file binutils which; then
         break
     fi
     dnf clean all || true
