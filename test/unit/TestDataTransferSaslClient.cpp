@@ -32,15 +32,15 @@ TEST(TestPayloadParse, TrailingComma) {
 }
 
 TEST(TestChooseQop, EmptyProtectionNoEncryptIsAuth) {
-    EXPECT_EQ("auth", chooseDataTransferQop("", false, true, true, true));
+    EXPECT_EQ("qop-auth", chooseDataTransferQop("", false, true, true, true));
 }
 
 TEST(TestChooseQop, EmptyProtectionDoesNotUpgradeToConf) {
-    EXPECT_EQ("auth", chooseDataTransferQop("", false, true, true, true));
+    EXPECT_EQ("qop-auth", chooseDataTransferQop("", false, true, true, true));
 }
 
 TEST(TestChooseQop, EncryptForcesConf) {
-    EXPECT_EQ("auth-conf", chooseDataTransferQop("", true, true, true, true));
+    EXPECT_EQ("qop-conf", chooseDataTransferQop("", true, true, true, true));
 }
 
 TEST(TestChooseQop, IntegrityWithoutServerIntThrows) {
@@ -49,19 +49,19 @@ TEST(TestChooseQop, IntegrityWithoutServerIntThrows) {
 }
 
 TEST(TestChooseQop, PrivacyRequiresConf) {
-    EXPECT_EQ("auth-conf", chooseDataTransferQop("privacy", false, true, true, true));
+    EXPECT_EQ("qop-conf", chooseDataTransferQop("privacy", false, true, true, true));
 }
 
 TEST(TestShouldWrap, AuthWithoutAesDoesNotWrap) {
-    EXPECT_FALSE(shouldWrapDataTransferSocket("auth", false));
+    EXPECT_FALSE(shouldWrapDataTransferSocket("qop-auth", false));
 }
 
 TEST(TestShouldWrap, ConfAlwaysWraps) {
-    EXPECT_TRUE(shouldWrapDataTransferSocket("auth-conf", false));
+    EXPECT_TRUE(shouldWrapDataTransferSocket("qop-conf", false));
 }
 
 TEST(TestShouldWrap, AesCtrWrapsEvenIfQopAuth) {
-    EXPECT_TRUE(shouldWrapDataTransferSocket("auth", true));
+    EXPECT_TRUE(shouldWrapDataTransferSocket("qop-auth", true));
 }
 
 #include <gsasl.h>
@@ -79,7 +79,7 @@ TEST(TestDigestMd5Handshake, Step1WithRealDataNodeChallenge) {
     gsasl_property_set(session, GSASL_REALM, "0");
     gsasl_property_set(session, GSASL_HOSTNAME, "0");
     gsasl_property_set(session, GSASL_SERVICE, "hdfs");
-    gsasl_property_set(session, GSASL_QOP, "auth");
+    gsasl_property_set(session, GSASL_QOP, "qop-auth");
 
     // Real DataNode challenge string
     const char *challenge =

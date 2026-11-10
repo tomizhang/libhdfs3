@@ -163,7 +163,7 @@ int main() {
     gsasl_property_set(s_digest, GSASL_REALM, "0");
     gsasl_property_set(s_digest, GSASL_HOSTNAME, "0");
     gsasl_property_set(s_digest, GSASL_SERVICE, "hdfs");
-    gsasl_property_set(s_digest, GSASL_QOP, "auth");
+    gsasl_property_set(s_digest, GSASL_QOP, "qop-auth");
     const char *dn_challenge = "realm=\"0\",nonce=\"0ljCKo2I4sUNP2SIwpryXfvoOS2Duk9FtMXGkHDO\",qop=\"auth,auth-int,auth-conf\",charset=utf-8,cipher=\"3des,rc4,des,rc4-56,rc4-40\",algorithm=md5-sess";
     char *digest_out = NULL;
     size_t digest_out_len = 0;

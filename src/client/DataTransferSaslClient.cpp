@@ -104,26 +104,26 @@ std::string chooseDataTransferQop(const std::string & clientProtection,
             THROW(SaslException,
                   "Data transfer privacy required but server QOP has no auth-conf");
         }
-        return "auth-conf";
+        return "qop-conf";
     }
     if (wantInt) {
         if (!serverInt) {
             THROW(SaslException,
                   "Data transfer integrity required but server QOP has no auth-int");
         }
-        return "auth-int";
+        return "qop-int";
     }
     if (!serverAuth) {
         THROW(SaslException,
               "Data transfer authentication required but server QOP has no auth");
     }
-    return "auth";
+    return "qop-auth";
 }
 
 bool shouldWrapDataTransferSocket(const std::string & negotiatedGsaslQop,
                                   bool hasValidAesCtrCipher) {
-    return negotiatedGsaslQop == "auth-int" ||
-           negotiatedGsaslQop == "auth-conf" ||
+    return negotiatedGsaslQop == "qop-int" ||
+           negotiatedGsaslQop == "qop-conf" ||
            hasValidAesCtrCipher;
 }
 
