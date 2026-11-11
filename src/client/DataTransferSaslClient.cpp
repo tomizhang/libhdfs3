@@ -548,7 +548,7 @@ std::shared_ptr<Socket> DataTransferSaslClient::doHandshake(){
     const std::string qop = saslClient->getNegotiatedQop();
 
     steady_clock::time_point t1 = steady_clock::now();
-    LOG(INFO, "DataTransferSaslClient::doHandshake completed in %ld ms (qop=%s, aes=%s)",
+    LOG(DEBUG1, "DataTransferSaslClient::doHandshake completed in %ld ms (qop=%s, aes=%s)",
         (long)ToMilliSeconds(t0, t1), qop.c_str(), validAes ? "true" : "false");
 
     if (!shouldWrapDataTransferSocket(qop, validAes)) {

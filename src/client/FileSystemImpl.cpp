@@ -213,7 +213,7 @@ void FileSystemImpl::connect() {
      */
     getFsStats();
     steady_clock::time_point t1 = steady_clock::now();
-    LOG(INFO, "FileSystemImpl::connect to \"%s\" completed in %ld ms", uri.c_str(), (long)ToMilliSeconds(t0, t1));
+    LOG(DEBUG1, "FileSystemImpl::connect to \"%s\" completed in %ld ms", uri.c_str(), (long)ToMilliSeconds(t0, t1));
 }
 
 /**

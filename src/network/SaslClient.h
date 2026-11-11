@@ -96,8 +96,11 @@ public:
 
     inline static void setKRB5ClientKTName(const std::string & keytab) {
         if (!keytab.empty()) {
-            if (0 != setenv("KRB5_CLIENT_KTNAME", keytab.c_str(), 1)) {
-                THROW(HdfsIOException, "Cannot set env parameter \"KRB5_CLIENT_KTNAME\"");
+            const char * cur = getenv("KRB5_CLIENT_KTNAME");
+            if (cur == NULL || strcmp(cur, keytab.c_str()) != 0) {
+                if (0 != setenv("KRB5_CLIENT_KTNAME", keytab.c_str(), 1)) {
+                    THROW(HdfsIOException, "Cannot set env parameter \"KRB5_CLIENT_KTNAME\"");
+                }
             }
         }
     }
@@ -120,9 +123,13 @@ protected:
 
         if (!cachePath.empty())
         {
-            if (0 != setenv("KRB5CCNAME", cachePath.c_str(), 1))
+            const char * cur = getenv("KRB5CCNAME");
+            if (cur == NULL || strcmp(cur, cachePath.c_str()) != 0)
             {
-                THROW(HdfsIOException, "Cannot set env parameter \"KRB5CCNAME\"");
+                if (0 != setenv("KRB5CCNAME", cachePath.c_str(), 1))
+                {
+                    THROW(HdfsIOException, "Cannot set env parameter \"KRB5CCNAME\"");
+                }
             }
         }
 

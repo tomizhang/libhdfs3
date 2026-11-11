@@ -39,6 +39,8 @@
 
 #include <string>
 #include <mutex>
+#include <atomic>
+#include <functional>
 #include <cstring>
 #include <ctime>
 #include <unistd.h>
@@ -176,13 +178,26 @@ void GSaslClient::ensureKerberosOptimizedConfig() {
         if (current == NULL || strlen(current) == 0) {
             std::string val = std::string("/etc/krb5.conf:") + overridePath;
             setenv("KRB5_CONFIG", val.c_str(), 1);
-            LOG(INFO, "Auto-configured KRB5_CONFIG=\"%s\" to disable reverse DNS / canonicalization timeouts", val.c_str());
+            LOG(DEBUG1, "Auto-configured KRB5_CONFIG=\"%s\" to disable reverse DNS / canonicalization timeouts", val.c_str());
         } else if (strstr(current, ".libhdfs3_krb5_override.conf") == NULL) {
             std::string val = std::string(current) + ":" + overridePath;
             setenv("KRB5_CONFIG", val.c_str(), 1);
-            LOG(INFO, "Appended to KRB5_CONFIG: \"%s\" to disable reverse DNS / canonicalization timeouts", val.c_str());
+            LOG(DEBUG1, "Appended to KRB5_CONFIG: \"%s\" to disable reverse DNS / canonicalization timeouts", val.c_str());
         }
     });
+}
+
+static std::mutex s_kinitMutex;
+static std::string s_lastPrincipal;
+static std::string s_lastKeytab;
+static std::string s_lastCcache;
+static std::atomic<int64_t> s_ticketEndTime(0);
+static std::atomic<uint64_t> s_keyHash(0);
+static std::atomic<bool> s_hasValidCred(false);
+
+static inline uint64_t calcKeyHash(const std::string & p, const std::string & k, const std::string & c) {
+    std::hash<std::string> h;
+    return h(p) ^ (h(k) << 1) ^ (h(c) << 2);
 }
 
 bool GSaslClient::kinitFromKeytab(const std::string & principalName,
@@ -194,21 +209,26 @@ bool GSaslClient::kinitFromKeytab(const std::string & principalName,
 
     ensureKerberosOptimizedConfig();
 
-    static std::mutex s_kinitMutex;
+    int64_t now = (int64_t)time(NULL);
+    uint64_t currentKeyHash = calcKeyHash(principalName, keytabFile, ccachePath);
+
+    // Fast lock-free path for concurrent threads reusing valid credential:
+    if (s_hasValidCred.load(std::memory_order_acquire) &&
+        s_keyHash.load(std::memory_order_relaxed) == currentKeyHash &&
+        s_ticketEndTime.load(std::memory_order_relaxed) > now + 300) {
+        return true;
+    }
+
     std::lock_guard<std::mutex> lock(s_kinitMutex);
 
-    static std::string s_lastPrincipal;
-    static std::string s_lastKeytab;
-    static std::string s_lastCcache;
-    static krb5_timestamp s_ticketEndTime = 0;
-    static bool s_hasValidCred = false;
-
-    krb5_timestamp now = time(NULL);
-    if (s_hasValidCred && s_lastKeytab == keytabFile &&
+    now = (int64_t)time(NULL);
+    if (s_hasValidCred.load(std::memory_order_relaxed) &&
+        s_lastKeytab == keytabFile &&
         (principalName.empty() || s_lastPrincipal == principalName) &&
-        s_lastCcache == ccachePath && s_ticketEndTime > now + 300) {
+        s_lastCcache == ccachePath &&
+        s_ticketEndTime.load(std::memory_order_relaxed) > now + 300) {
         LOG(DEBUG1, "kinitFromKeytab: Credential in cache for \"%s\" is still valid (%d s remaining), skipping KDC renewal",
-            s_lastPrincipal.c_str(), (int)(s_ticketEndTime - now));
+            s_lastPrincipal.c_str(), (int)(s_ticketEndTime.load(std::memory_order_relaxed) - now));
         return true;
     }
 
@@ -309,15 +329,16 @@ bool GSaslClient::kinitFromKeytab(const std::string & principalName,
 
         char * finalName = NULL;
         krb5_unparse_name(ctx, principal, &finalName);
-        s_hasValidCred = true;
         s_lastPrincipal = finalName ? finalName : principalName;
         s_lastKeytab = keytabFile;
         s_lastCcache = ccachePath;
-        s_ticketEndTime = creds.times.endtime;
+        s_ticketEndTime.store((int64_t)creds.times.endtime, std::memory_order_relaxed);
+        s_keyHash.store(currentKeyHash, std::memory_order_relaxed);
+        s_hasValidCred.store(true, std::memory_order_release);
 
         steady_clock::time_point t1 = steady_clock::now();
-        LOG(INFO, "kinitFromKeytab: Successfully obtained and stored Kerberos ticket for \"%s\" using keytab \"%s\" in %ld ms (valid for %d s)",
-            s_lastPrincipal.c_str(), keytabFile.c_str(), (long)ToMilliSeconds(t0, t1), (int)(s_ticketEndTime - now));
+        LOG(DEBUG1, "kinitFromKeytab: Successfully obtained and stored Kerberos ticket for \"%s\" using keytab \"%s\" in %ld ms (valid for %d s)",
+            s_lastPrincipal.c_str(), keytabFile.c_str(), (long)ToMilliSeconds(t0, t1), (int)(s_ticketEndTime.load(std::memory_order_relaxed) - now));
         if (finalName) krb5_free_unparsed_name(ctx, finalName);
     } while (0);
 

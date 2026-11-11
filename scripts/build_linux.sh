@@ -34,7 +34,7 @@ curl -sSL --retry 3 --retry-delay 5 -o gsasl-1.8.0.tar.gz https://ftp.osuosl.org
 tar -xzf gsasl-1.8.0.tar.gz
 cd gsasl-1.8.0
 patch -p1 < /workspace/scripts/gsasl-1.8.0-privacy.patch
-./configure --prefix=/usr/local --libdir=/usr/local/lib --enable-static --disable-shared --with-pic CFLAGS="-fPIC" LIBS="-lcrypto" --disable-nls --without-libidn --without-libntlm --with-gssapi-impl=mit
+./configure --prefix=/usr/local --libdir=/usr/local/lib --enable-static --disable-shared --with-pic CFLAGS="-fPIC -O2" CXXFLAGS="-fPIC -O2" LIBS="-lcrypto" --disable-nls --without-libidn --without-libntlm --with-gssapi-impl=mit
 make -j$(nproc)
 make install
 cd /tmp && rm -rf gsasl-1.8.0*
@@ -81,7 +81,7 @@ cd /tmp
 curl -sSL --retry 3 --retry-delay 5 -o libxml2-2.9.14.tar.xz https://download.gnome.org/sources/libxml2/2.9/libxml2-2.9.14.tar.xz
 tar -xf libxml2-2.9.14.tar.xz
 cd libxml2-2.9.14
-./configure --prefix=/usr/local --libdir=/usr/local/lib --enable-static --disable-shared --with-pic CFLAGS="-fPIC" --with-zlib --without-python --without-lzma
+./configure --prefix=/usr/local --libdir=/usr/local/lib --enable-static --disable-shared --with-pic CFLAGS="-fPIC -O2" CXXFLAGS="-fPIC -O2" --with-zlib --without-python --without-lzma
 make -j$(nproc)
 make install
 cd /tmp && rm -rf libxml2-2.9.14*
@@ -91,7 +91,7 @@ cd /tmp
 curl -sSL --retry 3 --retry-delay 5 -o protobuf-cpp-3.0.0.tar.gz https://github.com/protocolbuffers/protobuf/releases/download/v3.0.0/protobuf-cpp-3.0.0.tar.gz
 tar -xzf protobuf-cpp-3.0.0.tar.gz
 cd protobuf-3.0.0
-./configure --prefix=/usr/local --libdir=/usr/local/lib --enable-static --disable-shared --with-pic CFLAGS="-fPIC -w" CXXFLAGS="-fPIC -std=c++11 -w -O2"
+./configure --prefix=/usr/local --libdir=/usr/local/lib --enable-static --disable-shared --with-pic CFLAGS="-fPIC -O2 -w" CXXFLAGS="-fPIC -std=c++11 -O2 -w"
 make -j$(nproc)
 make install
 cd /tmp && rm -rf protobuf-3.0.0*
@@ -110,6 +110,8 @@ cd /workspace
 rm -rf build dist
 mkdir -p build
 cd build
+export CFLAGS="-O3 -fno-strict-aliasing"
+export CXXFLAGS="-O3 -fno-strict-aliasing"
 ../bootstrap --prefix=/usr/local
 make -j$(nproc)
 make install

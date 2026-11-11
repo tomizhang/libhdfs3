@@ -177,16 +177,28 @@ void TcpSocketImpl::connect(const char * host, const char * port, int timeout) {
     struct in6_addr addr6;
     int retval = 0;
 
+    bool isNumericPort = (port != NULL && *port != '\0');
+    if (isNumericPort) {
+        for (const char * p = port; *p != '\0'; ++p) {
+            if (*p < '0' || *p > '9') {
+                isNumericPort = false;
+                break;
+            }
+        }
+    }
+    int servFlag = isNumericPort ? AI_NUMERICSERV : 0;
+
     if (inet_pton(AF_INET, host, &addr4) == 1) {
         hints.ai_family = AF_INET;
-        hints.ai_flags = AI_NUMERICHOST;
+        hints.ai_flags = AI_NUMERICHOST | servFlag;
         retval = HdfsSystem::getaddrinfo(host, port, &hints, &addrs);
     } else if (inet_pton(AF_INET6, host, &addr6) == 1) {
         hints.ai_family = AF_INET6;
-        hints.ai_flags = AI_NUMERICHOST;
+        hints.ai_flags = AI_NUMERICHOST | servFlag;
         retval = HdfsSystem::getaddrinfo(host, port, &hints, &addrs);
     } else {
         // For hostnames, query IPv4 first to avoid AAAA timeout on IPv4-only networks
+        hints.ai_flags = servFlag;
         hints.ai_family = AF_INET;
         retval = HdfsSystem::getaddrinfo(host, port, &hints, &addrs);
         if (0 != retval) {
@@ -228,7 +240,7 @@ void TcpSocketImpl::connect(const char * host, const char * port, int timeout) {
                 steady_clock::time_point t_end = steady_clock::now();
                 long elapsedMs = (long)ToMilliSeconds(t_start, t_end);
                 if (elapsedMs > 50) {
-                    LOG(INFO, "TcpSocketImpl::connect to \"%s:%s\" completed in %ld ms", host, port, elapsedMs);
+                    LOG(DEBUG1, "TcpSocketImpl::connect to \"%s:%s\" completed in %ld ms", host, port, elapsedMs);
                 }
                 return;
             }

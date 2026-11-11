@@ -198,14 +198,14 @@ shared_ptr<Socket> RemoteBlockReader::createNewPeer(const DatanodeInfo& dn, cons
                 DataTransferSaslClient saslClient(socket, conf, dataEncryptionKey, token);
                 std::shared_ptr<Socket> res = saslClient.doHandshake();
                 steady_clock::time_point t1 = steady_clock::now();
-                LOG(INFO, "RemoteBlockReader::createNewPeer to \"%s\" completed in %ld ms",
+                LOG(DEBUG1, "RemoteBlockReader::createNewPeer to \"%s\" completed in %ld ms",
                     dn.formatAddress().c_str(), (long)ToMilliSeconds(t0, t1));
                 return res;
             } else {
                 socket->connect(dn.getIpAddr().c_str(), dn.getXferPort(), connTimeout);
                 socket->setNoDelay(true);
                 steady_clock::time_point t1 = steady_clock::now();
-                LOG(INFO, "RemoteBlockReader::createNewPeer to \"%s\" completed in %ld ms",
+                LOG(DEBUG1, "RemoteBlockReader::createNewPeer to \"%s\" completed in %ld ms",
                     dn.formatAddress().c_str(), (long)ToMilliSeconds(t0, t1));
                 return socket;
             }

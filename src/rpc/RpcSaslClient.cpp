@@ -439,7 +439,7 @@ std::shared_ptr<Socket> RpcSaslClient::doHandshake() {
     } while (!done);
     
     steady_clock::time_point t1 = steady_clock::now();
-    LOG(INFO, "RpcSaslClient::doHandshake completed in %ld ms", (long)ToMilliSeconds(t0, t1));
+    LOG(DEBUG1, "RpcSaslClient::doHandshake completed in %ld ms", (long)ToMilliSeconds(t0, t1));
     return underlyingSocket;
 }
 
