@@ -18,7 +18,7 @@ dnf config-manager --set-enabled powertools || dnf config-manager --set-enabled 
 
 for i in 1 2 3 4 5; do
     echo "Attempt $i: Installing core build dependencies..."
-    if dnf install -y gcc gcc-c++ cmake make autoconf automake libtool wget tar xz diffutils \
+    if dnf install -y gcc gcc-c++ cmake make autoconf automake libtool wget tar xz diffutils patch \
         krb5-devel libuuid-devel openssl-devel boost-devel zlib-devel git file binutils which; then
         break
     fi
@@ -32,7 +32,8 @@ curl -sSL --retry 3 --retry-delay 5 -o gsasl-1.8.0.tar.gz https://ftp.gnu.org/gn
 curl -sSL --retry 3 --retry-delay 5 -o gsasl-1.8.0.tar.gz https://ftp.osuosl.org/pub/gnu/gsasl/gsasl-1.8.0.tar.gz
 tar -xzf gsasl-1.8.0.tar.gz
 cd gsasl-1.8.0
-./configure --prefix=/usr/local --libdir=/usr/local/lib --enable-static --disable-shared --with-pic CFLAGS="-fPIC" --disable-nls --without-libidn --without-libntlm --with-gssapi-impl=mit
+patch -p1 < /workspace/scripts/gsasl-1.8.0-privacy.patch
+./configure --prefix=/usr/local --libdir=/usr/local/lib --enable-static --disable-shared --with-pic CFLAGS="-fPIC" LIBS="-lcrypto" --disable-nls --without-libidn --without-libntlm --with-gssapi-impl=mit
 make -j$(nproc)
 make install
 cd /tmp && rm -rf gsasl-1.8.0*
@@ -70,7 +71,7 @@ int main() {
     return 0;
 }
 EOF
-gcc /tmp/check_gsasl.c -I/usr/local/include /usr/local/lib/libgsasl.a -lgssapi_krb5 -lkrb5 -lk5crypto -lcom_err -o /tmp/check_gsasl
+gcc /tmp/check_gsasl.c -I/usr/local/include /usr/local/lib/libgsasl.a -lcrypto -lgssapi_krb5 -lkrb5 -lk5crypto -lcom_err -o /tmp/check_gsasl
 /tmp/check_gsasl
 rm -f /tmp/check_gsasl*
 
@@ -176,8 +177,32 @@ int main() {
     if (digest_out) free(digest_out);
     gsasl_finish(s_digest);
 
+    Gsasl_session *s_conf = NULL;
+    rc = gsasl_client_start(ctx, "DIGEST-MD5", &s_conf);
+    printf("gsasl_client_start('DIGEST-MD5 qop-conf') rc = %d (%s)\n", rc, gsasl_strerror(rc));
+    if (rc != GSASL_OK) {
+        fprintf(stderr, "FATAL: DIGEST-MD5 qop-conf client_start failed!\n");
+        return 1;
+    }
+    gsasl_property_set(s_conf, GSASL_AUTHID, "dGVzdC10b2tlbg==");
+    gsasl_property_set(s_conf, GSASL_PASSWORD, "cGFzc3dvcmQ=");
+    gsasl_property_set(s_conf, GSASL_REALM, "0");
+    gsasl_property_set(s_conf, GSASL_HOSTNAME, "0");
+    gsasl_property_set(s_conf, GSASL_SERVICE, "hdfs");
+    gsasl_property_set(s_conf, GSASL_QOP, "qop-conf");
+    digest_out = NULL;
+    digest_out_len = 0;
+    rc = gsasl_step(s_conf, dn_challenge, strlen(dn_challenge), &digest_out, &digest_out_len);
+    printf("DataTransfer DIGEST-MD5 qop-conf step rc = %d (expected %d, GSASL_NEEDS_MORE)\n", rc, GSASL_NEEDS_MORE);
+    if (rc != GSASL_NEEDS_MORE) {
+        fprintf(stderr, "FATAL: DataTransfer DIGEST-MD5 qop-conf challenge step failed: %d (%s)\n", rc, gsasl_strerror(rc));
+        return 1;
+    }
+    if (digest_out) free(digest_out);
+    gsasl_finish(s_conf);
+
     gsasl_done(ctx);
-    printf("SUCCESS: libhdfs3.so embedded GSASL sessions (GSSAPI & DIGEST-MD5) verified!\n");
+    printf("SUCCESS: libhdfs3.so embedded GSASL sessions (GSSAPI, DIGEST-MD5 auth & DIGEST-MD5 conf) verified!\n");
     return 0;
 }
 EOF

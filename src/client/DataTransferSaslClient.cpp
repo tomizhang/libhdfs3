@@ -443,24 +443,20 @@ std::shared_ptr<Socket> DataTransferSaslClientInternal::doHandshake(){
 
     std::string identifier;
     std::string password;
-    if(dataEncryptionKey.getKeyId()> 0 && !dataEncryptionKey.getEncryptionAlgorithm().empty()){
+    if (dataEncryptionKey.getKeyId() > 0) {
         std::stringstream ss;
-        ss<<static_cast<int32_t>(dataEncryptionKey.getKeyId())<<" ";
-        ss<<dataEncryptionKey.getBlockPoolId()<<" ";
-        ss<<base64Encode(dataEncryptionKey.getNonce());
+        ss << static_cast<int32_t>(dataEncryptionKey.getKeyId()) << " ";
+        ss << dataEncryptionKey.getBlockPoolId() << " ";
+        ss << base64Encode(dataEncryptionKey.getNonce());
         identifier = ss.str();
         password = base64Encode(dataEncryptionKey.getEncryptionKey());
-        //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_AUTHID: [%s]", identifier.c_str());
-        //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_AUTHID[Hex]: [%s]", stringToHex(identifier).c_str());
-        //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_PASSWORD[Base64]: [%s]", password.c_str());
-        //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_PASSWORD[Hex]: [%s]", stringToHex(dataEncryptionKey.getEncryptionKey()).c_str());
+        LOG(DEBUG1, "DataTransferSaslClientInternal: using DataEncryptionKey (keyId=%u, blockPool=%s)",
+            dataEncryptionKey.getKeyId(), dataEncryptionKey.getBlockPoolId().c_str());
     } else {
         identifier = base64Encode(token.getIdentifier());
         password = base64Encode(token.getPassword());
-        //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_AUTHID[Base64]: [%s]", identifier.c_str());
-        //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_AUTHID[Hex]: [%s]", stringToHex(token.getIdentifier()).c_str());
-        //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_PASSWORD[Base64]: [%s]", password.c_str());
-        //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_PASSWORD[Hex]: [%s]", stringToHex(token.getPassword()).c_str());
+        LOG(DEBUG1, "DataTransferSaslClientInternal: fallback to BlockToken (identifier_len=%zu)",
+            token.getIdentifier().size());
     }
     
     //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->GSASL_REALM: [%s]", payload.realms.empty() ? "" : payload.realms[0].c_str());
@@ -477,18 +473,20 @@ std::shared_ptr<Socket> DataTransferSaslClientInternal::doHandshake(){
     selectSaslQop(payload);
 
     //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->evaluateChallenge [1]");
-    std::string challenge = conf.getDfsEncryptDataTransferAlgorithm().empty()
-                                ? dataTransferEncryptorMessage.payload()
-                                : payload.toString();
+    std::string challenge = dataTransferEncryptorMessage.payload();
     challenge = evaluateChallenge(challenge);
-    
-    selectCipherOption(dataTransferEncryptorMessage, cipherOption);
+
+    CipherOptionProto proposedCipher;
+    if (strcasecmp(conf.getDfsEncryptDataTransferCipherSuites().c_str(),
+                   DFS_ENCRYPT_DATA_TRANSFER_CIPHER_SUITES_AES_CTR_NOPADDING) == 0) {
+        proposedCipher.set_suite(CipherSuiteProto::AES_CTR_NOPADDING);
+    }
 
     //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->Send [2]");
     sendSaslMessage(false,
         DataTransferEncryptorMessageProto::DataTransferEncryptorStatus
         ::DataTransferEncryptorMessageProto_DataTransferEncryptorStatus_SUCCESS,
-        challenge, std::string(), &cipherOption);
+        challenge, std::string(), proposedCipher.has_suite() ? &proposedCipher : NULL);
     
     //LOG(INFO, "DataTransferSaslClientInternal::doHandshake->Read [2]");
     readSaslMessage(dataTransferEncryptorMessage);
