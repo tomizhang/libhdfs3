@@ -45,6 +45,7 @@
 #include <sstream>
 
 #include "DateTime.h"
+#include "Logger.h"
 #include "Exception.h"
 #include "ExceptionInternal.h"
 #include "TcpSocket.h"
@@ -166,11 +167,33 @@ void TcpSocketImpl::connect(const char * host, int port, int timeout) {
 
 void TcpSocketImpl::connect(const char * host, const char * port, int timeout) {
     assert(-1 == sock);
-    struct addrinfo hints, *addrs, *paddr;
+    steady_clock::time_point t_start = steady_clock::now();
+
+    struct addrinfo hints, *addrs = NULL, *paddr = NULL;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = PF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    int retval = HdfsSystem::getaddrinfo(host, port, &hints, &addrs);
+
+    struct in_addr addr4;
+    struct in6_addr addr6;
+    int retval = 0;
+
+    if (inet_pton(AF_INET, host, &addr4) == 1) {
+        hints.ai_family = AF_INET;
+        hints.ai_flags = AI_NUMERICHOST;
+        retval = HdfsSystem::getaddrinfo(host, port, &hints, &addrs);
+    } else if (inet_pton(AF_INET6, host, &addr6) == 1) {
+        hints.ai_family = AF_INET6;
+        hints.ai_flags = AI_NUMERICHOST;
+        retval = HdfsSystem::getaddrinfo(host, port, &hints, &addrs);
+    } else {
+        // For hostnames, query IPv4 first to avoid AAAA timeout on IPv4-only networks
+        hints.ai_family = AF_INET;
+        retval = HdfsSystem::getaddrinfo(host, port, &hints, &addrs);
+        if (0 != retval) {
+            hints.ai_family = PF_UNSPEC;
+            retval = HdfsSystem::getaddrinfo(host, port, &hints, &addrs);
+        }
+    }
 
     if (0 != retval) {
         THROW(HdfsNetworkConnectException, "Failed to resolve address \"%s:%s\" %s",
@@ -202,6 +225,11 @@ void TcpSocketImpl::connect(const char * host, const char * port, int timeout) {
 
             if (-1 != sock) {
                 HdfsSystem::freeaddrinfo(addrs);
+                steady_clock::time_point t_end = steady_clock::now();
+                long elapsedMs = (long)ToMilliSeconds(t_start, t_end);
+                if (elapsedMs > 50) {
+                    LOG(INFO, "TcpSocketImpl::connect to \"%s:%s\" completed in %ld ms", host, port, elapsedMs);
+                }
                 return;
             }
 

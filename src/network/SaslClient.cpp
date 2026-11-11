@@ -35,10 +35,13 @@
 #include "SocketReader.h"
 #include "SocketWriter.h"
 #include "BufferedSocketReader.h"
+#include "common/DateTime.h"
 
 #include <string>
 #include <mutex>
 #include <cstring>
+#include <ctime>
+#include <unistd.h>
 #include <krb5/krb5.h>
 #include <gsasl.h>
 
@@ -152,6 +155,36 @@ void GSaslClient::decrypt(std::string & dst, const std::string_view & src) {
     //LOG(DEBUG1, "GSaslClient::decrypt End");
 }
 
+void GSaslClient::ensureKerberosOptimizedConfig() {
+    static std::once_flag s_krb5ConfigOnce;
+    std::call_once(s_krb5ConfigOnce, []() {
+        const char * overridePath = "/tmp/.libhdfs3_krb5_override.conf";
+        // Check if override file already exists or create it
+        if (access(overridePath, F_OK) != 0) {
+            FILE * fp = fopen(overridePath, "w");
+            if (fp) {
+                fputs("[libdefaults]\n"
+                      "    rdns = false\n"
+                      "    dns_canonicalize_hostname = false\n"
+                      "    dns_lookup_kdc = false\n"
+                      "    dns_lookup_realm = false\n", fp);
+                fclose(fp);
+            }
+        }
+
+        const char * current = getenv("KRB5_CONFIG");
+        if (current == NULL || strlen(current) == 0) {
+            std::string val = std::string("/etc/krb5.conf:") + overridePath;
+            setenv("KRB5_CONFIG", val.c_str(), 1);
+            LOG(INFO, "Auto-configured KRB5_CONFIG=\"%s\" to disable reverse DNS / canonicalization timeouts", val.c_str());
+        } else if (strstr(current, ".libhdfs3_krb5_override.conf") == NULL) {
+            std::string val = std::string(current) + ":" + overridePath;
+            setenv("KRB5_CONFIG", val.c_str(), 1);
+            LOG(INFO, "Appended to KRB5_CONFIG: \"%s\" to disable reverse DNS / canonicalization timeouts", val.c_str());
+        }
+    });
+}
+
 bool GSaslClient::kinitFromKeytab(const std::string & principalName,
                                   const std::string & keytabFile,
                                   const std::string & ccachePath) {
@@ -159,8 +192,27 @@ bool GSaslClient::kinitFromKeytab(const std::string & principalName,
         return false;
     }
 
+    ensureKerberosOptimizedConfig();
+
     static std::mutex s_kinitMutex;
     std::lock_guard<std::mutex> lock(s_kinitMutex);
+
+    static std::string s_lastPrincipal;
+    static std::string s_lastKeytab;
+    static std::string s_lastCcache;
+    static krb5_timestamp s_ticketEndTime = 0;
+    static bool s_hasValidCred = false;
+
+    krb5_timestamp now = time(NULL);
+    if (s_hasValidCred && s_lastKeytab == keytabFile &&
+        (principalName.empty() || s_lastPrincipal == principalName) &&
+        s_lastCcache == ccachePath && s_ticketEndTime > now + 300) {
+        LOG(DEBUG1, "kinitFromKeytab: Credential in cache for \"%s\" is still valid (%d s remaining), skipping KDC renewal",
+            s_lastPrincipal.c_str(), (int)(s_ticketEndTime - now));
+        return true;
+    }
+
+    steady_clock::time_point t0 = steady_clock::now();
 
     krb5_context ctx = NULL;
     krb5_principal principal = NULL;
@@ -257,8 +309,15 @@ bool GSaslClient::kinitFromKeytab(const std::string & principalName,
 
         char * finalName = NULL;
         krb5_unparse_name(ctx, principal, &finalName);
-        LOG(DEBUG1, "kinitFromKeytab: Successfully obtained and stored Kerberos ticket for %s using keytab %s",
-            finalName ? finalName : principalName.c_str(), keytabFile.c_str());
+        s_hasValidCred = true;
+        s_lastPrincipal = finalName ? finalName : principalName;
+        s_lastKeytab = keytabFile;
+        s_lastCcache = ccachePath;
+        s_ticketEndTime = creds.times.endtime;
+
+        steady_clock::time_point t1 = steady_clock::now();
+        LOG(INFO, "kinitFromKeytab: Successfully obtained and stored Kerberos ticket for \"%s\" using keytab \"%s\" in %ld ms (valid for %d s)",
+            s_lastPrincipal.c_str(), keytabFile.c_str(), (long)ToMilliSeconds(t0, t1), (int)(s_ticketEndTime - now));
         if (finalName) krb5_free_unparsed_name(ctx, finalName);
     } while (0);
 

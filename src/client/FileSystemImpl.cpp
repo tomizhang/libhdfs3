@@ -36,6 +36,7 @@
 #include "InputStream.h"
 #include "LeaseRenewer.h"
 #include "Logger.h"
+#include "common/DateTime.h"
 #include "OutputStream.h"
 #include "OutputStreamImpl.h"
 #include "server/LocatedBlocks.h"
@@ -150,6 +151,7 @@ const char * FileSystemImpl::getClientName() {
 
 void FileSystemImpl::connect() {
     //LOG(DEBUG1, "FileSystemImpl::connect()");
+    steady_clock::time_point t0 = steady_clock::now();
     std::string host, port, uri;
     std::vector<NamenodeInfo> namenodeInfos;
 
@@ -210,6 +212,8 @@ void FileSystemImpl::connect() {
      * To test if the connection is ok
      */
     getFsStats();
+    steady_clock::time_point t1 = steady_clock::now();
+    LOG(INFO, "FileSystemImpl::connect to \"%s\" completed in %ld ms", uri.c_str(), (long)ToMilliSeconds(t0, t1));
 }
 
 /**

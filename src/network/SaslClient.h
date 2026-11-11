@@ -106,6 +106,8 @@ public:
                                 const std::string & keytabFile,
                                 const std::string & ccachePath = "");
 
+    static void ensureKerberosOptimizedConfig();
+
 protected:
 
     inline static std::string extractPrincipalFromTicketCache(const std::string &cachePath) {

@@ -30,6 +30,7 @@
 #include "common/Memory.h"
 #include "common/BigEndian.h"
 #include "common/Logger.h"
+#include "common/DateTime.h"
 #include "common/DebugUtil.h"
 #include "common/HWCrc32c.h"
 #include "common/SWCrc32c.h"
@@ -181,6 +182,7 @@ RemoteBlockReader::~RemoteBlockReader() {
 }
 
 shared_ptr<Socket> RemoteBlockReader::createNewPeer(const DatanodeInfo& dn, const RpcAuth & auth) {
+    steady_clock::time_point t0 = steady_clock::now();
     int sleep = 1;
     exception_ptr lastError = nullptr;
     for (int i = 0; i < maxRetryOnConnect; ++i) {
@@ -194,10 +196,17 @@ shared_ptr<Socket> RemoteBlockReader::createNewPeer(const DatanodeInfo& dn, cons
                 socket->connect(dn.getIpAddr().c_str(), port.c_str(), connTimeout);
                 socket->setNoDelay(tcpNoDelay);
                 DataTransferSaslClient saslClient(socket, conf, dataEncryptionKey, token);
-                return saslClient.doHandshake();
+                std::shared_ptr<Socket> res = saslClient.doHandshake();
+                steady_clock::time_point t1 = steady_clock::now();
+                LOG(INFO, "RemoteBlockReader::createNewPeer to \"%s\" completed in %ld ms",
+                    dn.formatAddress().c_str(), (long)ToMilliSeconds(t0, t1));
+                return res;
             } else {
                 socket->connect(dn.getIpAddr().c_str(), dn.getXferPort(), connTimeout);
                 socket->setNoDelay(true);
+                steady_clock::time_point t1 = steady_clock::now();
+                LOG(INFO, "RemoteBlockReader::createNewPeer to \"%s\" completed in %ld ms",
+                    dn.formatAddress().c_str(), (long)ToMilliSeconds(t0, t1));
                 return socket;
             }
         } catch (const SaslException & e) {

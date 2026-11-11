@@ -29,6 +29,7 @@
 #include "common/Memory.h"
 #include "common/SessionConfig.h"
 #include "common/Logger.h"
+#include "common/DateTime.h"
 
 #include "common/Exception.h"
 #include "common/ExceptionInternal.h"
@@ -339,6 +340,7 @@ const RpcSaslProto_SaslAuth * RpcSaslClient::findSaslAuth(
 
 std::shared_ptr<Socket> RpcSaslClient::doHandshake() {
     LOG(DEBUG1, "RpcSaslClient::doHandshake Begin");
+    steady_clock::time_point t0 = steady_clock::now();
     
     if (rpcChannelKey.hasToken()) {
         rpcAuth.setMethod(AuthMethod::TOKEN);
@@ -436,7 +438,8 @@ std::shared_ptr<Socket> RpcSaslClient::doHandshake() {
         }
     } while (!done);
     
-    LOG(DEBUG1, "RpcSaslClient::doHandshake End");
+    steady_clock::time_point t1 = steady_clock::now();
+    LOG(INFO, "RpcSaslClient::doHandshake completed in %ld ms", (long)ToMilliSeconds(t0, t1));
     return underlyingSocket;
 }
 
@@ -447,6 +450,8 @@ RpcSaslClient::~RpcSaslClient() {
 void RpcSaslClient::initKerberos(const RpcSaslProto_SaslAuth & auth) {
     LOG(DEBUG1, "RpcSaslClient::initKerberos Begin");
     int rc;
+
+    ensureKerberosOptimizedConfig();
 
     /* Create new authentication session. */
     if ((rc = gsasl_client_start(ctx, auth.mechanism().c_str(), &session)) != GSASL_OK) {

@@ -31,6 +31,7 @@
 #include "common/ClientId.h"
 #include "common/Memory.h"
 #include "common/Logger.h"
+#include "common/DateTime.h"
 #include "common/DebugUtil.h"
 #include "common/WriteBuffer.h"
 #include "network/Socket.h"
@@ -151,7 +152,8 @@ DataTransferSaslClientInternal::DataTransferSaslClientInternal(const std::shared
             {
                 LOG(DEBUG1, "DataTransferSaslClientInternal->AuthMethod: KERBEROS, Principal: %s, Keytab: %s", principal.c_str(), keytab.c_str());
                 setKRB5ClientKTName(keytab);
-                kinitFromKeytab(principal, keytab, conf.getKerberosCachePath());
+                // Note: DataTransfer uses DIGEST-MD5 with tokens/DEK, NOT Kerberos tickets.
+                // Do not invoke kinitFromKeytab here to avoid repeated KDC network roundtrips.
             }
         }
         else if(!conf.getKerberosCachePath().empty())
@@ -520,6 +522,7 @@ DataTransferSaslClient::~DataTransferSaslClient(){
 
 std::shared_ptr<Socket> DataTransferSaslClient::doHandshake(){
     //LOG(DEBUG1, "DataTransferSaslClient::doHandshake Begin");
+    steady_clock::time_point t0 = steady_clock::now();
     if (saslClient->isComplete()) {
         THROW(SaslException, "Do not re handshake!");
     }
@@ -543,6 +546,10 @@ std::shared_ptr<Socket> DataTransferSaslClient::doHandshake(){
         cipherOption.iniv().size() == 16;
 
     const std::string qop = saslClient->getNegotiatedQop();
+
+    steady_clock::time_point t1 = steady_clock::now();
+    LOG(INFO, "DataTransferSaslClient::doHandshake completed in %ld ms (qop=%s, aes=%s)",
+        (long)ToMilliSeconds(t0, t1), qop.c_str(), validAes ? "true" : "false");
 
     if (!shouldWrapDataTransferSocket(qop, validAes)) {
         if (conf.isDfsEncryptDataTransfer()) {
